@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 const STORAGE_KEY = 'snl_state_v1';
 import './App.css';
-import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL, TASKS_SHEET_URL } from './config';
+import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL } from './config';
 import { fetchTasks, listGamePacks, weightedPick } from './tasks';
 
 const BOARD_SIZE = 100; // classic 10x10
@@ -282,6 +282,15 @@ export default function App() {
     });
   }
 
+  function setPlayerName(idx, name) {
+    setPlayers((prev) => {
+      const next = prev.map((p) => ({ ...p }));
+      if (!next[idx]) return prev;
+      next[idx].name = (name || '').slice(0, 20);
+      return next;
+    });
+  }
+
   return (
     <div className="page">
       <header className="topbar">
@@ -294,7 +303,6 @@ export default function App() {
         </div>
         <div className="top-actions">
           <button className="btn ghost" onClick={resetSession}>New session</button>
-          <a className="btn ghost" href={TASKS_SHEET_URL} target="_blank" rel="noreferrer">Task bank</a>
         </div>
       </header>
 
@@ -332,6 +340,23 @@ export default function App() {
                     ))}
                     <span className="muted turnLabel">Turn: {players[turn]?.name || `P${turn + 1}`}</span>
                   </div>
+                </div>
+
+                <div className="names">
+                  {players.map((p, i) => (
+                    <label key={i} className="nameRow">
+                      <span className="nameLeft">
+                        <PlayerChip idx={i} active={i === turn} />
+                        <span className="muted">Name</span>
+                      </span>
+                      <input
+                        className="nameInput"
+                        value={p.name || ''}
+                        onChange={(e) => setPlayerName(i, e.target.value)}
+                        placeholder={`P${i + 1}`}
+                      />
+                    </label>
+                  ))}
                 </div>
               </div>
 
@@ -499,8 +524,6 @@ export default function App() {
           <div>Built for <strong>ESL practice</strong>. Edit the sheet to add more tasks.</div>
           <div className="footerRight">
             <a href="https://github.com/audiophrases/snakesandladders" target="_blank" rel="noreferrer">GitHub</a>
-            <span className="dot">•</span>
-            <a href={TASKS_CSV_URL} target="_blank" rel="noreferrer">CSV</a>
           </div>
         </footer>
       </main>

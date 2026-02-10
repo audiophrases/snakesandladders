@@ -72,6 +72,16 @@ select{
   outline:none;
 }
 
+input{
+  width:100%;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.14);
+  color:var(--text);
+  border-radius:12px;
+  padding:10px 12px;
+  outline:none;
+}
+
 .btn{
   cursor:pointer;
   border-radius:14px;
@@ -131,6 +141,11 @@ select{
 .playersRow{display:flex; gap:10px; align-items:center;}
 .playersMini{display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
 .turnLabel{margin-left:6px; font-size:12px;}
+
+.names{margin-top:10px; display:flex; flex-direction:column; gap:8px;}
+.nameRow{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+.nameLeft{display:flex; align-items:center; gap:8px; min-width:120px;}
+.nameInput{flex:1;}
 
 .pchip{width:12px; height:12px; border-radius:99px; border:2px solid rgba(0,0,0,.25); box-shadow: 0 4px 12px rgba(0,0,0,.25);}
 .pchip.active{outline:2px solid rgba(255,255,255,.55); outline-offset:2px;}
