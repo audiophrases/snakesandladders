@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
-import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL } from './config';
+import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL, TASKS_SHEET_URL } from './config';
 import { fetchTasks, listGamePacks, weightedPick } from './tasks';
 
 const BOARD_SIZE = 100; // classic 10x10
@@ -245,7 +245,7 @@ export default function App() {
         </div>
         <div className="top-actions">
           <button className="btn ghost" onClick={resetSession}>New session</button>
-          <a className="btn ghost" href="https://docs.google.com/spreadsheets/d/1ITLDp3Bp_ohKnw-Zg4gq4JJ-pIAnFMCEp0Rumyx3zdM/edit" target="_blank" rel="noreferrer">Task bank</a>
+          <a className="btn ghost" href={TASKS_SHEET_URL} target="_blank" rel="noreferrer">Task bank</a>
         </div>
       </header>
 
