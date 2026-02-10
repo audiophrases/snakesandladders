@@ -56,9 +56,25 @@
 .hero-left h1{font-size:34px; line-height:1.1; margin:0 0 8px;}
 .hero-left p{margin:0 0 14px; color:var(--muted)}
 
+.turnBanner{
+  margin-top:10px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  padding:12px 12px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.16);
+  background: linear-gradient(135deg, rgba(96,165,250,.14), rgba(34,197,94,.10));
+}
+.turnBannerName{display:flex; align-items:center; gap:10px; font-weight:900; font-size:18px;}
+.turnBannerLeft{display:flex; flex-direction:column; gap:2px;}
+.turnBannerRight{display:flex; flex-direction:column; align-items:flex-end; gap:2px;}
+
 .controls{display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:10px;}
 @media (max-width: 700px){
   .controls{grid-template-columns:1fr;}
+  .turnBannerRight{align-items:flex-start;}
 }
 
 .control label{display:block; font-size:12px; color:var(--muted); margin-bottom:6px;}
@@ -155,6 +171,9 @@ input{
   border:1px solid rgba(255,255,255,.12);
   overflow:hidden;
 }
+.cell.turnCell{
+  box-shadow: 0 0 0 2px rgba(96,165,250,.65), 0 14px 30px rgba(0,0,0,.22);
+}
 .cell.snake{border-color: rgba(251,113,133,.28);}
 .cell.ladder{border-color: rgba(34,197,94,.25);}
 .cellNum{position:absolute; top:6px; left:8px; font-size:11px; color:rgba(255,255,255,.65)}
@@ -165,6 +184,8 @@ input{
 .playersRow{display:flex; gap:10px; align-items:center;}
 .playersMini{display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
 .turnLabel{margin-left:6px; font-size:12px;}
+.turnNow{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.16); background:rgba(0,0,0,.18)}
+.turnName{font-weight:900;}
 
 .names{margin-top:10px; display:flex; flex-direction:column; gap:8px;}
 .nameRow{display:flex; align-items:center; justify-content:space-between; gap:10px;}

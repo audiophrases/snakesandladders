@@ -335,6 +335,20 @@ export default function App() {
             <h1>Snakes & Ladders — ESL practice</h1>
             <p className="muted">Roll, do the challenge, mark success, move.</p>
 
+            <div className="turnBanner" aria-label="Current turn">
+              <div className="turnBannerLeft">
+                <span className="muted">Current turn</span>
+                <div className="turnBannerName">
+                  <PlayerChip idx={turn} active />
+                  <span>{players[turn]?.name || `P${turn + 1}`}</span>
+                </div>
+              </div>
+              <div className="turnBannerRight">
+                <span className="muted">Position</span>
+                <span className="mono">{players[turn]?.pos || 0} / {BOARD_SIZE}</span>
+              </div>
+            </div>
+
             <div className="controls">
               <div className="control">
                 <label>Language points (combine)</label>
@@ -388,7 +402,11 @@ export default function App() {
                     {players.map((_, i) => (
                       <PlayerChip key={i} idx={i} active={i === turn} />
                     ))}
-                    <span className="muted turnLabel">Turn: {players[turn]?.name || `P${turn + 1}`}</span>
+                    <span className="muted turnLabel">Turn:</span>
+                    <span className="turnNow">
+                      <PlayerChip idx={turn} active />
+                      <span className="turnName">{players[turn]?.name || `P${turn + 1}`}</span>
+                    </span>
                   </div>
                 </div>
 
@@ -468,11 +486,13 @@ export default function App() {
                   .filter((x) => x.on)
                   .map((x) => x.i);
 
+                const isTurnCell = players[turn]?.pos === n;
+
                 const jumpTo = JUMPS[n];
                 const jumpKind = jumpTo ? (jumpTo > n ? 'ladder' : 'snake') : '';
 
                 return (
-                  <div key={n} className={`cell ${jumpKind}`} role="gridcell">
+                  <div key={n} className={`cell ${jumpKind} ${isTurnCell ? 'turnCell' : ''}`} role="gridcell">
                     <div className="cellNum">{n}</div>
                     {n === BOARD_SIZE ? <div className="cellWin">🏁</div> : null}
                     {jumpTo ? (
