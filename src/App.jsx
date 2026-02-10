@@ -564,7 +564,6 @@ export default function App() {
               <li>Pick a language point (game).</li>
               <li>Roll the dice 🎲 to draw a challenge.</li>
               <li>Mark Success/Fail.</li>
-              <li>Use connectors whenever you can.</li>
             </ol>
 
             <div className="cardTitle">Recent draws</div>
