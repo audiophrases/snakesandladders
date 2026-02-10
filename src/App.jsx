@@ -332,9 +332,6 @@ export default function App() {
       <main className="container">
         <section className="hero">
           <div className="hero-left">
-            <h1>Snakes & Ladders — ESL practice</h1>
-            <p className="muted">Roll, do the challenge, mark success, move.</p>
-
             <div className="turnBanner" aria-label="Current turn">
               <div className="turnBannerLeft">
                 <span className="muted">Current turn</span>
