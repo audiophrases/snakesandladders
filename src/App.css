@@ -90,6 +90,8 @@ select{
   background:rgba(255,255,255,.06);
   box-shadow:none;
 }
+.btn.success{background: linear-gradient(135deg, rgba(34,197,94,.35), rgba(96,165,250,.12));}
+.btn.fail{background: linear-gradient(135deg, rgba(251,113,133,.35), rgba(167,139,250,.10));}
 
 .diceRow{display:flex; gap:12px; align-items:center;}
 
@@ -125,9 +127,46 @@ select{
 .posterLine{color:var(--muted)}
 .posterEmojis{font-size:26px; margin-top:10px}
 
+.boardWrap{margin-top:16px;}
+.boardCard{padding:14px;}
+.boardHeader{display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:10px;}
+.board{
+  display:grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap:6px;
+}
+.cell{
+  position:relative;
+  min-height:52px;
+  border-radius:12px;
+  background: rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.12);
+  overflow:hidden;
+}
+.cell.snake{border-color: rgba(251,113,133,.28);}
+.cell.ladder{border-color: rgba(34,197,94,.25);}
+.cellNum{position:absolute; top:6px; left:8px; font-size:11px; color:rgba(255,255,255,.65)}
+.cellJump{position:absolute; top:6px; right:8px; font-size:11px; color:rgba(255,255,255,.70)}
+.cellOcc{position:absolute; bottom:6px; left:8px; display:flex; gap:4px; flex-wrap:wrap;}
+
+.playersRow{display:flex; gap:10px; align-items:center;}
+.playersMini{display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
+.turnLabel{margin-left:6px; font-size:12px;}
+
+.pchip{width:12px; height:12px; border-radius:99px; border:2px solid rgba(0,0,0,.25); box-shadow: 0 4px 12px rgba(0,0,0,.25);}
+.pchip.active{outline:2px solid rgba(255,255,255,.55); outline-offset:2px;}
+
+.resultRow{display:flex; gap:10px; margin-top:10px;}
+
+.card.win{border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.10)}
+
 .play{display:grid; grid-template-columns: 1.2fr .8fr; gap:16px; margin-top:16px;}
 @media (max-width: 900px){
   .play{grid-template-columns:1fr;}
+}
+@media (max-width: 520px){
+  .board{gap:4px;}
+  .cell{min-height:46px;}
 }
 
 .taskHeader{display:flex; justify-content:space-between; align-items:center; gap:10px;}
