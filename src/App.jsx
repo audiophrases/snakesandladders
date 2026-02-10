@@ -132,6 +132,18 @@ function Badge({ children }) {
   return <span className="badge">{children}</span>;
 }
 
+function Collapsible({ title, defaultOpen = true, right, children }) {
+  return (
+    <details className="collapsible" open={defaultOpen}>
+      <summary className="collapsibleSummary">
+        <span className="collapsibleTitle">{title}</span>
+        {right ? <span className="collapsibleRight">{right}</span> : null}
+      </summary>
+      <div className="collapsibleBody">{children}</div>
+    </details>
+  );
+}
+
 function typeLabel(t) {
   if (t === 'speaking') return 'Speaking';
   if (t === 'error_correction') return 'Fix the mistake';
@@ -511,8 +523,10 @@ export default function App() {
             </div>
 
             <div className="controls">
-              <div className="control">
-                <label>Language points (combine)</label>
+              <Collapsible
+                title="Language points"
+                right={<span className="muted">Selected: {(selectedPacks?.length || 0) || (pack ? 1 : 0)}</span>}
+              >
                 <div className="packBox">
                   <div className="packTop">
                     <div className="packTopLeft">
@@ -523,9 +537,6 @@ export default function App() {
                         Select all
                       </button>
                     </div>
-                    <span className="muted">
-                      Selected: {(selectedPacks?.length || 0) || (pack ? 1 : 0)}
-                    </span>
                   </div>
 
                   <div className="packGrid">
@@ -552,10 +563,10 @@ export default function App() {
                     })}
                   </div>
                 </div>
-              </div>
+              </Collapsible>
 
-              <div className="control">
-                <label>Players</label>
+              <Collapsible title="Players" right={<span className="muted">{numPlayers} players</span>}
+>
                 <div className="playersRow">
                   <select value={numPlayers} onChange={(e) => setPlayerCount(parseInt(e.target.value, 10))}>
                     {[1, 2, 3, 4, 5, 6].map((n) => (
@@ -592,13 +603,12 @@ export default function App() {
                     </label>
                   ))}
                 </div>
-              </div>
+              </Collapsible>
 
-              <div className="control">
-                <label>Game board</label>
+              <Collapsible title="Game settings" right={<span className="muted">Board: {boardSize}</span>}>
                 <div className="boardControls">
                   <div className="boardControlRow">
-                    <span className="muted">Size</span>
+                    <span className="muted">Board size</span>
                     <select value={boardSize} onChange={(e) => setBoardSizeAndReset(parseInt(e.target.value, 10))}>
                       {[40, 50, 60, 70, 80, 90, 100].map((n) => (
                         <option key={n} value={n}>
@@ -607,22 +617,17 @@ export default function App() {
                       ))}
                     </select>
                   </div>
-                  <div className="hint">
-                    Smaller boards are faster games. Max is 100.
-                  </div>
+                  <div className="hint">Smaller boards are faster games. Max is 100.</div>
                 </div>
-              </div>
 
-              <div className="control">
-                <label>Levels</label>
-                <div className="levelBox">
+                <div className="levelBox" style={{ marginTop: 10 }}>
                   <div className="packTop">
                     <div className="packTopLeft">
                       <button className="btn ghost" type="button" onClick={clearLevels}>
-                        Clear
+                        Clear levels
                       </button>
                       <button className="btn ghost" type="button" onClick={selectAllLevels} disabled={!levels.length}>
-                        Select all
+                        Select all levels
                       </button>
                     </div>
                     <span className="muted">Selected: {selectedLevels?.length || 0}</span>
@@ -641,10 +646,12 @@ export default function App() {
                   </div>
                   <div className="hint">Leave empty to include all levels.</div>
                 </div>
-              </div>
+              </Collapsible>
+            </div>
 
-              <div className="control">
-                <label>Dice</label>
+            <div className="diceTaskRow">
+              <div className="card diceCard">
+                <div className="cardTitle">Dice</div>
                 <div className="diceRow">
                   <Dice value={dice} />
                   <button className="btn" onClick={rollAndDraw} disabled={loading || !!error || !filtered.length || winnerIdx >= 0 || animating}>
@@ -655,8 +662,49 @@ export default function App() {
                   <button className="btn success" onClick={() => applyMove(true)} disabled={!pending || winnerIdx >= 0 || animating}>Success ✅</button>
                   <button className="btn fail" onClick={() => applyMove(false)} disabled={!pending || winnerIdx >= 0 || animating}>Fail ❌</button>
                 </div>
-                <div className="hint">
-                  Success = move by dice. Fail = stay. To win, you must land exactly on {boardSize}.
+                <div className="hint">Success = move by dice. Fail = stay. Exact landing required to win.</div>
+              </div>
+
+              <div className="card task taskInline">
+                <div className="taskHeader">
+                  <div className="taskMeta">
+                    <Badge>{packLabel}</Badge>
+                    {current ? <Badge>{typeLabel(current.type)}</Badge> : <Badge>Ready</Badge>}
+                    {current?.grammarTags?.slice(0, 2).map((t) => <Badge key={t}>{t}</Badge>)}
+                  </div>
+                  <div className="taskActions">
+                    <button className="btn ghost" onClick={() => setShowAnswer((v) => !v)} disabled={!current || !current.target}>
+                      {showAnswer ? 'Hide' : 'Show'} answer
+                    </button>
+                  </div>
+                </div>
+
+                <div className="taskBody">
+                  {current ? (
+                    <>
+                      <div className="prompt">{current.prompt}</div>
+                      {showAnswer && current.target ? (
+                        <div className="answer">
+                          <div className="answerLabel">Suggested answer</div>
+                          <div className="mono">{current.target}</div>
+                        </div>
+                      ) : null}
+
+                      {current.connectors?.length ? (
+                        <div className="connectors">
+                          <span className="muted">Connectors:</span> {current.connectors.join(', ')}
+                        </div>
+                      ) : null}
+
+                      {current.notes ? (
+                        <div className="notes">
+                          <span className="muted">Note:</span> {current.notes}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="empty">Click <strong>Roll & Draw</strong> to start.</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -736,63 +784,22 @@ export default function App() {
           </div>
         </section>
 
-        <section className="play">
-          <div className="card task">
-            <div className="taskHeader">
-              <div className="taskMeta">
-                <Badge>{packLabel}</Badge>
-                {current ? <Badge>{typeLabel(current.type)}</Badge> : <Badge>Ready</Badge>}
-                {current?.grammarTags?.slice(0, 2).map((t) => <Badge key={t}>{t}</Badge>)}
-              </div>
-              <div className="taskActions">
-                <button className="btn ghost" onClick={() => setShowAnswer((v) => !v)} disabled={!current || !current.target}>
-                  {showAnswer ? 'Hide' : 'Show'} answer
-                </button>
-              </div>
-            </div>
-
-            <div className="taskBody">
-              {current ? (
-                <>
-                  <div className="prompt">{current.prompt}</div>
-                  {showAnswer && current.target ? (
-                    <div className="answer">
-                      <div className="answerLabel">Suggested answer</div>
-                      <div className="mono">{current.target}</div>
-                    </div>
-                  ) : null}
-
-                  {current.connectors?.length ? (
-                    <div className="connectors">
-                      <span className="muted">Connectors:</span> {current.connectors.join(', ')}
-                    </div>
-                  ) : null}
-
-                  {current.notes ? (
-                    <div className="notes">
-                      <span className="muted">Note:</span> {current.notes}
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <div className="empty">
-                  Click <strong>Roll & Draw</strong> to start.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="card sidebar">
-            <div className="cardTitle">How to play</div>
+        <section className="belowBoard">
+          <Collapsible title="How to play" defaultOpen={false}>
             <ol className="steps">
-              <li>Pick a language point (game).</li>
+              <li>Pick language points and levels.</li>
               <li>Roll the dice 🎲 to draw a challenge.</li>
               <li>Mark Success/Fail.</li>
             </ol>
+          </Collapsible>
 
-            <div className="cardTitle">Recent draws</div>
+          <Collapsible
+            title="Recent draws"
+            defaultOpen={false}
+            right={<span className="muted">{history.length ? `${history.length} in session` : 'None yet'}</span>}
+          >
             <div className="recent">
-              {history.slice(0, 6).map((t) => (
+              {history.slice(0, 10).map((t) => (
                 <button
                   key={t.id}
                   className="recentItem"
@@ -810,7 +817,7 @@ export default function App() {
               ))}
               {!history.length ? <div className="muted">No draws yet.</div> : null}
             </div>
-          </div>
+          </Collapsible>
         </section>
 
         <footer className="footer">
