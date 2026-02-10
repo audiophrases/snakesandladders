@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 
-const STORAGE_KEY = 'snl_state_v1';
+const STORAGE_KEY = 'snl_state_v2';
 import './App.css';
 import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL } from './config';
 import { fetchTasks, listGamePacks, weightedPick } from './tasks';
 
-const BOARD_SIZE = 100; // classic 10x10
+const DEFAULT_BOARD_SIZE = 100; // max
 
-// Simple snakes & ladders (can tune later). Format: start -> end
-const JUMPS = {
+// Base snakes & ladders for size=100. We'll scale these down for smaller boards.
+// Format: start -> end
+const BASE_JUMPS_100 = {
   // ladders
   4: 14,
   9: 31,
@@ -27,6 +28,82 @@ const JUMPS = {
   95: 75,
   99: 78,
 };
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function buildJumps(boardSize) {
+  if (boardSize === 100) return { ...BASE_JUMPS_100 };
+  const scale = boardSize / 100;
+
+  const out = {};
+  const usedStarts = new Set();
+
+  const add = (s, e) => {
+    if (!Number.isFinite(s) || !Number.isFinite(e)) return;
+    if (s <= 1 || s >= boardSize) return;
+    if (e <= 1 || e >= boardSize) return;
+    if (e === s) return;
+    if (usedStarts.has(s)) return;
+    usedStarts.add(s);
+    out[s] = e;
+  };
+
+  for (const [startStr, end] of Object.entries(BASE_JUMPS_100)) {
+    const start = parseInt(startStr, 10);
+    const kind = end > start ? 'ladder' : 'snake';
+
+    // scaled positions
+    let s = Math.round(start * scale);
+    let e = Math.round(end * scale);
+
+    s = clamp(s, 2, boardSize - 2);
+
+    // preserve direction and ensure a minimum jump distance
+    const minDelta = Math.max(3, Math.round(6 * scale));
+    if (kind === 'ladder') {
+      e = clamp(Math.max(e, s + minDelta), 2, boardSize - 1);
+    } else {
+      e = clamp(Math.min(e, s - minDelta), 2, boardSize - 1);
+    }
+
+    // avoid landing exactly on final square (keeps win clean)
+    if (e === boardSize) e = boardSize - 1;
+
+    add(s, e);
+  }
+
+  return out;
+}
+
+function boardRows(boardSize, cols = 10) {
+  return Math.max(1, Math.ceil(boardSize / cols));
+}
+
+function buildBoardCells(boardSize, cols = 10) {
+  // Returns an array of numbers (or null) in visual grid order (top-left to bottom-right),
+  // with boustrophedon rows.
+  const rows = boardRows(boardSize, cols);
+  const cells = [];
+
+  let n = boardSize;
+  for (let r = 0; r < rows; r++) {
+    const row = [];
+    for (let c = 0; c < cols; c++) {
+      if (n >= 1) row.push(n--);
+      else row.push(null);
+    }
+    if (r % 2 === 1) row.reverse();
+    cells.push(...row);
+  }
+  return cells;
+}
+
+function sleep(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -74,22 +151,7 @@ function PlayerChip({ idx, active }) {
   );
 }
 
-function buildBoardCells(size) {
-  // Returns an array of numbers in visual grid order (top-left to bottom-right), with boustrophedon rows.
-  const side = Math.sqrt(size);
-  const n = Number.isInteger(side) ? side : 10;
-  const rows = [];
-  let start = size;
-  for (let r = 0; r < n; r++) {
-    const rowNums = [];
-    for (let c = 0; c < n; c++) rowNums.push(start - c);
-    start -= n;
-    // alternate direction
-    if (r % 2 === 1) rowNums.reverse();
-    rows.push(rowNums);
-  }
-  return rows.flat();
-}
+// (board cells builder is defined above as buildBoardCells(boardSize, cols))
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -101,11 +163,16 @@ export default function App() {
   const [dice, setDice] = useState(1);
   const [history, setHistory] = useState([]);
 
+  const [boardSize, setBoardSize] = useState(DEFAULT_BOARD_SIZE);
+
   const [numPlayers, setNumPlayers] = useState(2);
   const [players, setPlayers] = useState(() => Array.from({ length: 2 }, (_, i) => ({ name: `P${i + 1}`, pos: 0 })));
   const [turn, setTurn] = useState(0);
   const [pending, setPending] = useState(null); // { roll, taskId }
   const [hydrated, setHydrated] = useState(false);
+  const [animating, setAnimating] = useState(false);
+
+  const [selectedLevels, setSelectedLevels] = useState([]);
 
   // "session" rng
   const rng = useMemo(() => mulberry32(Date.now() & 0xffffffff), []);
@@ -126,6 +193,8 @@ export default function App() {
           if (Array.isArray(s.history)) setHistory(s.history);
           if (typeof s.showAnswer === 'boolean') setShowAnswer(s.showAnswer);
           if (s.pending && typeof s.pending === 'object') setPending(s.pending);
+          if (typeof s.boardSize === 'number') setBoardSize(clamp(s.boardSize, 40, 100));
+          if (Array.isArray(s.selectedLevels)) setSelectedLevels(s.selectedLevels);
         }
       }
     } catch {
@@ -176,6 +245,41 @@ export default function App() {
     setPack('');
   }
 
+  function selectAllPacks() {
+    setSelectedPacks(packs.map((p) => p.name));
+    setPack('');
+  }
+
+  function toggleLevel(lv) {
+    setSelectedLevels((prev) => {
+      const set = new Set(prev || []);
+      if (set.has(lv)) set.delete(lv);
+      else set.add(lv);
+      return Array.from(set);
+    });
+  }
+
+  function clearLevels() {
+    setSelectedLevels([]);
+  }
+
+  function selectAllLevels() {
+    setSelectedLevels(levels.slice());
+  }
+
+  const levels = useMemo(() => {
+    const set = new Set();
+    let hasEmpty = false;
+    for (const t of tasks) {
+      const lv = (t.level || '').trim();
+      if (!lv) hasEmpty = true;
+      else set.add(lv);
+    }
+    const out = Array.from(set).sort((a, b) => a.localeCompare(b));
+    if (hasEmpty) out.push('Unspecified');
+    return out;
+  }, [tasks]);
+
   const filtered = useMemo(() => {
     const legacy = (pack || '').trim();
     const chosen = (selectedPacks || []).filter(Boolean);
@@ -183,14 +287,36 @@ export default function App() {
     // Backward compatibility: if only legacy 'pack' is set, treat it as the selection.
     const effective = chosen.length ? chosen : (legacy ? [legacy] : []);
 
-    if (!effective.length) return tasks;
-    const set = new Set(effective);
-    return tasks.filter((t) => set.has(t.focus || 'General'));
-  }, [tasks, pack, selectedPacks]);
+    let out = tasks;
+    if (effective.length) {
+      const set = new Set(effective);
+      out = out.filter((t) => set.has(t.focus || 'General'));
+    }
+
+    if ((selectedLevels || []).length) {
+      const set = new Set(selectedLevels);
+      out = out.filter((t) => {
+        const lv = (t.level || '').trim();
+        if (!lv) return set.has('Unspecified');
+        return set.has(lv);
+      });
+    }
+
+    return out;
+  }, [tasks, pack, selectedPacks, selectedLevels]);
 
   const current = history[0] || null;
 
-  const boardCells = useMemo(() => buildBoardCells(BOARD_SIZE), []);
+  const packLabel = useMemo(() => {
+    const chosen = (selectedPacks || []).filter(Boolean);
+    if (chosen.length > 1) return `Mixed (${chosen.length})`;
+    if (chosen.length === 1) return chosen[0];
+    return (pack || 'General').trim() || 'General';
+  }, [pack, selectedPacks]);
+
+  const jumps = useMemo(() => buildJumps(boardSize), [boardSize]);
+  const boardCells = useMemo(() => buildBoardCells(boardSize, 10), [boardSize]);
+  const rows = useMemo(() => boardRows(boardSize, 10), [boardSize]);
 
   // Persist session state locally
   useEffect(() => {
@@ -198,6 +324,8 @@ export default function App() {
     const state = {
       pack,
       selectedPacks,
+      selectedLevels,
+      boardSize,
       dice,
       turn,
       numPlayers,
@@ -212,7 +340,7 @@ export default function App() {
     } catch {
       // ignore quota / storage errors
     }
-  }, [hydrated, pack, selectedPacks, dice, turn, numPlayers, players, pending, history, showAnswer]);
+  }, [hydrated, pack, selectedPacks, selectedLevels, boardSize, dice, turn, numPlayers, players, pending, history, showAnswer]);
 
   function roll() {
     const value = 1 + Math.floor(rng() * 6);
@@ -243,6 +371,7 @@ export default function App() {
   }
 
   function rollAndDraw() {
+    if (animating) return;
     if (!filtered.length) return;
     if (!players.length) return;
 
@@ -254,33 +383,58 @@ export default function App() {
     setPending({ roll: value, taskId: picked.id });
   }
 
-  function applyMove(success) {
+  async function applyMove(success) {
     if (!pending || !current) return;
+    if (animating) return;
 
-    if (success) {
-      setPlayers((ps) => {
-        const next = ps.map((p) => ({ ...p }));
-        const p = next[turn];
-        let newPos = p.pos + pending.roll;
+    setAnimating(true);
 
-        // classic rule: must land exactly on 100
-        if (newPos > BOARD_SIZE) newPos = p.pos;
+    try {
+      if (success) {
+        const startPos = players[turn]?.pos || 0;
+        let target = startPos + pending.roll;
 
-        // snakes/ladders
-        const jumped = JUMPS[newPos];
-        if (jumped) newPos = jumped;
+        // classic rule: must land exactly on final square
+        if (target > boardSize) target = startPos;
 
-        p.pos = newPos;
-        return next;
-      });
+        // Step animation
+        const stepDelay = 160;
+        if (target !== startPos) {
+          for (let pos = startPos + 1; pos <= target; pos++) {
+            setPlayers((ps) => {
+              const next = ps.map((p) => ({ ...p }));
+              if (next[turn]) next[turn].pos = pos;
+              return next;
+            });
+            await sleep(stepDelay);
+          }
+        } else {
+          // tiny feedback so the user feels it happened
+          await sleep(120);
+        }
+
+        // snakes/ladders jump animation
+        const jumped = jumps[target];
+        if (jumped && jumped !== target) {
+          await sleep(220);
+          setPlayers((ps) => {
+            const next = ps.map((p) => ({ ...p }));
+            if (next[turn]) next[turn].pos = jumped;
+            return next;
+          });
+          await sleep(220);
+        }
+      }
+
+      // next player's turn
+      setTurn((t) => (players.length ? (t + 1) % players.length : 0));
+      setPending(null);
+    } finally {
+      setAnimating(false);
     }
-
-    // next player's turn
-    setTurn((t) => (players.length ? (t + 1) % players.length : 0));
-    setPending(null);
   }
 
-  const winnerIdx = useMemo(() => players.findIndex((p) => p.pos === BOARD_SIZE), [players]);
+  const winnerIdx = useMemo(() => players.findIndex((p) => p.pos === boardSize), [players, boardSize]);
 
   function resetSession() {
     setHistory([]);
@@ -289,6 +443,16 @@ export default function App() {
     setTurn(0);
     setPlayers((ps) => ps.map((p, i) => ({ ...p, pos: 0, name: p.name || `P${i + 1}` })));
     roll();
+  }
+
+  function setBoardSizeAndReset(n) {
+    const nextSize = clamp(n, 40, 100);
+    setBoardSize(nextSize);
+    setPending(null);
+    setTurn(0);
+    setPlayers((ps) => ps.map((p, i) => ({ ...p, pos: 0, name: p.name || `P${i + 1}` })));
+    setHistory([]);
+    setShowAnswer(false);
   }
 
   function setPlayerCount(n) {
@@ -342,7 +506,7 @@ export default function App() {
               </div>
               <div className="turnBannerRight">
                 <span className="muted">Position</span>
-                <span className="mono">{players[turn]?.pos || 0} / {BOARD_SIZE}</span>
+                <span className="mono">{players[turn]?.pos || 0} / {boardSize}</span>
               </div>
             </div>
 
@@ -351,9 +515,14 @@ export default function App() {
                 <label>Language points (combine)</label>
                 <div className="packBox">
                   <div className="packTop">
-                    <button className="btn ghost" type="button" onClick={clearPacks}>
-                      Clear
-                    </button>
+                    <div className="packTopLeft">
+                      <button className="btn ghost" type="button" onClick={clearPacks}>
+                        Clear
+                      </button>
+                      <button className="btn ghost" type="button" onClick={selectAllPacks} disabled={!packs.length}>
+                        Select all
+                      </button>
+                    </div>
                     <span className="muted">
                       Selected: {(selectedPacks?.length || 0) || (pack ? 1 : 0)}
                     </span>
@@ -426,19 +595,68 @@ export default function App() {
               </div>
 
               <div className="control">
+                <label>Game board</label>
+                <div className="boardControls">
+                  <div className="boardControlRow">
+                    <span className="muted">Size</span>
+                    <select value={boardSize} onChange={(e) => setBoardSizeAndReset(parseInt(e.target.value, 10))}>
+                      {[40, 50, 60, 70, 80, 90, 100].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="hint">
+                    Smaller boards are faster games. Max is 100.
+                  </div>
+                </div>
+              </div>
+
+              <div className="control">
+                <label>Levels</label>
+                <div className="levelBox">
+                  <div className="packTop">
+                    <div className="packTopLeft">
+                      <button className="btn ghost" type="button" onClick={clearLevels}>
+                        Clear
+                      </button>
+                      <button className="btn ghost" type="button" onClick={selectAllLevels} disabled={!levels.length}>
+                        Select all
+                      </button>
+                    </div>
+                    <span className="muted">Selected: {selectedLevels?.length || 0}</span>
+                  </div>
+
+                  <div className="levelGrid">
+                    {levels.map((lv) => {
+                      const checked = (selectedLevels || []).includes(lv);
+                      return (
+                        <label key={lv} className={`packItem ${checked ? 'on' : ''}`}>
+                          <input type="checkbox" checked={checked} onChange={() => toggleLevel(lv)} />
+                          <span className="packName">{lv}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="hint">Leave empty to include all levels.</div>
+                </div>
+              </div>
+
+              <div className="control">
                 <label>Dice</label>
                 <div className="diceRow">
                   <Dice value={dice} />
-                  <button className="btn" onClick={rollAndDraw} disabled={loading || !!error || !filtered.length || winnerIdx >= 0}>
+                  <button className="btn" onClick={rollAndDraw} disabled={loading || !!error || !filtered.length || winnerIdx >= 0 || animating}>
                     Roll & Draw
                   </button>
                 </div>
                 <div className="resultRow">
-                  <button className="btn success" onClick={() => applyMove(true)} disabled={!pending || winnerIdx >= 0}>Success ✅</button>
-                  <button className="btn fail" onClick={() => applyMove(false)} disabled={!pending || winnerIdx >= 0}>Fail ❌</button>
+                  <button className="btn success" onClick={() => applyMove(true)} disabled={!pending || winnerIdx >= 0 || animating}>Success ✅</button>
+                  <button className="btn fail" onClick={() => applyMove(false)} disabled={!pending || winnerIdx >= 0 || animating}>Fail ❌</button>
                 </div>
                 <div className="hint">
-                  Success = move by dice. Fail = stay. To win, you must land exactly on {BOARD_SIZE}.
+                  Success = move by dice. Fail = stay. To win, you must land exactly on {boardSize}.
                 </div>
               </div>
             </div>
@@ -446,7 +664,7 @@ export default function App() {
             {winnerIdx >= 0 ? (
               <div className="card win">
                 <div className="cardTitle">Winner!</div>
-                <div className="mono">{players[winnerIdx]?.name || `P${winnerIdx + 1}`} reached {BOARD_SIZE} 🎉</div>
+                <div className="mono">{players[winnerIdx]?.name || `P${winnerIdx + 1}`} reached {boardSize} 🎉</div>
               </div>
             ) : null}
 
@@ -476,8 +694,17 @@ export default function App() {
               <div className="cardTitle">Board</div>
               <div className="muted">Snakes 🐍 and ladders 🪜 are included (basic set).</div>
             </div>
-            <div className="board" role="grid" aria-label="Snakes and Ladders board">
-              {boardCells.map((n) => {
+            <div
+              className="board"
+              role="grid"
+              aria-label="Snakes and Ladders board"
+              style={{ gridTemplateColumns: 'repeat(10, 1fr)', gridTemplateRows: `repeat(${rows}, 1fr)` }}
+            >
+              {boardCells.map((n, idx) => {
+                if (n == null) {
+                  return <div key={`blank-${idx}`} className="cell blank" role="presentation" />;
+                }
+
                 const occupants = players
                   .map((p, i) => ({ i, on: p.pos === n }))
                   .filter((x) => x.on)
@@ -485,13 +712,13 @@ export default function App() {
 
                 const isTurnCell = players[turn]?.pos === n;
 
-                const jumpTo = JUMPS[n];
+                const jumpTo = jumps[n];
                 const jumpKind = jumpTo ? (jumpTo > n ? 'ladder' : 'snake') : '';
 
                 return (
                   <div key={n} className={`cell ${jumpKind} ${isTurnCell ? 'turnCell' : ''}`} role="gridcell">
                     <div className="cellNum">{n}</div>
-                    {n === BOARD_SIZE ? <div className="cellWin">🏁</div> : null}
+                    {n === boardSize ? <div className="cellWin">🏁</div> : null}
                     {jumpTo ? (
                       <div className="cellJump">
                         {jumpTo > n ? '🪜' : '🐍'} {n}→{jumpTo}
@@ -513,7 +740,7 @@ export default function App() {
           <div className="card task">
             <div className="taskHeader">
               <div className="taskMeta">
-                <Badge>{pack || 'General'}</Badge>
+                <Badge>{packLabel}</Badge>
                 {current ? <Badge>{typeLabel(current.type)}</Badge> : <Badge>Ready</Badge>}
                 {current?.grammarTags?.slice(0, 2).map((t) => <Badge key={t}>{t}</Badge>)}
               </div>
