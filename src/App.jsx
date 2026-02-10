@@ -96,6 +96,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [tasks, setTasks] = useState([]);
   const [pack, setPack] = useState('');
+  const [selectedPacks, setSelectedPacks] = useState([]);
   const [showAnswer, setShowAnswer] = useState(false);
   const [dice, setDice] = useState(1);
   const [history, setHistory] = useState([]);
@@ -117,6 +118,7 @@ export default function App() {
         const s = JSON.parse(raw);
         if (s && typeof s === 'object') {
           if (typeof s.pack === 'string') setPack(s.pack);
+          if (Array.isArray(s.selectedPacks)) setSelectedPacks(s.selectedPacks);
           if (typeof s.dice === 'number') setDice(s.dice);
           if (typeof s.turn === 'number') setTurn(s.turn);
           if (typeof s.numPlayers === 'number') setNumPlayers(s.numPlayers);
@@ -160,11 +162,31 @@ export default function App() {
 
   const packs = useMemo(() => listGamePacks(tasks), [tasks]);
 
+  function togglePack(name) {
+    setSelectedPacks((prev) => {
+      const set = new Set(prev || []);
+      if (set.has(name)) set.delete(name);
+      else set.add(name);
+      return Array.from(set);
+    });
+  }
+
+  function clearPacks() {
+    setSelectedPacks([]);
+    setPack('');
+  }
+
   const filtered = useMemo(() => {
-    const p = (pack || '').trim();
-    if (!p) return tasks;
-    return tasks.filter((t) => (t.focus || 'General') === p);
-  }, [tasks, pack]);
+    const legacy = (pack || '').trim();
+    const chosen = (selectedPacks || []).filter(Boolean);
+
+    // Backward compatibility: if only legacy 'pack' is set, treat it as the selection.
+    const effective = chosen.length ? chosen : (legacy ? [legacy] : []);
+
+    if (!effective.length) return tasks;
+    const set = new Set(effective);
+    return tasks.filter((t) => set.has(t.focus || 'General'));
+  }, [tasks, pack, selectedPacks]);
 
   const current = history[0] || null;
 
@@ -175,6 +197,7 @@ export default function App() {
     if (!hydrated) return;
     const state = {
       pack,
+      selectedPacks,
       dice,
       turn,
       numPlayers,
@@ -189,7 +212,7 @@ export default function App() {
     } catch {
       // ignore quota / storage errors
     }
-  }, [hydrated, pack, dice, turn, numPlayers, players, pending, history, showAnswer]);
+  }, [hydrated, pack, selectedPacks, dice, turn, numPlayers, players, pending, history, showAnswer]);
 
   function roll() {
     const value = 1 + Math.floor(rng() * 6);
@@ -314,14 +337,41 @@ export default function App() {
 
             <div className="controls">
               <div className="control">
-                <label>Game / language point</label>
-                <select value={pack} onChange={(e) => setPack(e.target.value)}>
-                  {packs.map((p) => (
-                    <option key={p.name} value={p.name}>
-                      {p.name} ({p.count})
-                    </option>
-                  ))}
-                </select>
+                <label>Language points (combine)</label>
+                <div className="packBox">
+                  <div className="packTop">
+                    <button className="btn ghost" type="button" onClick={clearPacks}>
+                      Clear
+                    </button>
+                    <span className="muted">
+                      Selected: {(selectedPacks?.length || 0) || (pack ? 1 : 0)}
+                    </span>
+                  </div>
+
+                  <div className="packGrid">
+                    {packs.map((p) => {
+                      const checked = (selectedPacks || []).includes(p.name) || (!selectedPacks?.length && pack === p.name);
+                      return (
+                        <label key={p.name} className={`packItem ${checked ? 'on' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              // migrate from legacy single-pack state
+                              if (pack && !selectedPacks?.length) {
+                                setSelectedPacks([pack]);
+                                setPack('');
+                              }
+                              togglePack(p.name);
+                            }}
+                          />
+                          <span className="packName">{p.name}</span>
+                          <span className="muted">({p.count})</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               <div className="control">

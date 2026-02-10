@@ -82,6 +82,30 @@ input{
   outline:none;
 }
 
+.packBox{
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.05);
+  border-radius:14px;
+  padding:10px;
+}
+.packTop{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
+.packGrid{display:grid; grid-template-columns: 1fr 1fr; gap:8px;}
+@media (max-width: 700px){
+  .packGrid{grid-template-columns:1fr;}
+}
+.packItem{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(0,0,0,.12);
+}
+.packItem.on{border-color: rgba(96,165,250,.35); background: rgba(96,165,250,.10);}
+.packItem input{width:auto;}
+.packName{font-weight:700;}
+
 .btn{
   cursor:pointer;
   border-radius:14px;

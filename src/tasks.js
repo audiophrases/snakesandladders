@@ -96,14 +96,25 @@ export async function fetchTasks(csvUrl) {
   const idx = {
     id: col('id'),
     level: col('level'),
+
+    // Pack / focus
+    pack: col('pack'),
     focus: col('focus'),
+
     prompt: col('prompt'),
+
+    // Answer / target
+    answer: col('answer'),
     target: col('target'),
+
+    // Tags / metadata
     grammar_tags: col('grammar_tags'),
+    tags: col('tags'),
     connectors: col('connectors'),
     notes: col('notes'),
     source: col('source'),
-    // optional future columns
+
+    // optional
     type: col('type'),
     task_type: col('task_type'),
     lang_dir: col('lang_dir'),
@@ -116,8 +127,8 @@ export async function fetchTasks(csvUrl) {
     const get = (k) => (idx[k] >= 0 ? norm(row[idx[k]]) : '');
 
     const prompt = get('prompt');
-    const target = get('target');
-    const focus = get('focus') || 'General';
+    const target = get('target') || get('answer');
+    const focus = get('pack') || get('focus') || 'General';
 
     if (!prompt) continue;
 
@@ -144,7 +155,7 @@ export async function fetchTasks(csvUrl) {
       focus,
       prompt,
       target,
-      grammarTags: splitTags(get('grammar_tags')),
+      grammarTags: splitTags(get('grammar_tags') || get('tags')),
       connectors: splitTags(get('connectors')),
       notes: get('notes'),
       source: get('source'),
