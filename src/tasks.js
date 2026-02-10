@@ -86,7 +86,14 @@ function splitTags(s) {
 export async function fetchTasks(csvUrl) {
   const res = await fetch(csvUrl, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to load tasks CSV (${res.status})`);
-  const text = await res.text();
+
+  // Force UTF-8 decoding (Google "published CSV" sometimes comes without a charset;
+  // some browsers will mis-decode and you get cafÃ© instead of café).
+  const buf = await res.arrayBuffer();
+  let text = new TextDecoder('utf-8').decode(buf);
+  // Strip UTF-8 BOM if present
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+
   const rows = parseCSV(text);
   if (!rows.length) return [];
 
