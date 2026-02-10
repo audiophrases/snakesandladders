@@ -252,10 +252,9 @@ export default function App() {
       <main className="container">
         <section className="hero">
           <div className="hero-left">
-            <h1>Roll the dice. Get a challenge. Move on the board.</h1>
-            <p>
-              Balanced mix of <strong>speaking</strong>, <strong>error correction</strong>, and
-              <strong> translations</strong> (CA↔EN). Pass the challenge to advance.
+            <h1>Snakes & Ladders — ESL practice</h1>
+            <p className="muted">
+              Roll, do the challenge, mark success, move.
             </p>
 
             <div className="controls">
