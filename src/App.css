@@ -51,10 +51,7 @@
 
 .container{max-width:1100px; margin:0 auto; padding:22px 16px 28px;}
 
-.hero{display:grid; grid-template-columns: 1.2fr .8fr; gap:16px; align-items:stretch;}
-@media (max-width: 900px){
-  .hero{grid-template-columns:1fr;}
-}
+.hero{display:grid; grid-template-columns: 1fr; gap:16px; align-items:stretch;}
 
 .hero-left h1{font-size:34px; line-height:1.1; margin:0 0 8px;}
 .hero-left p{margin:0 0 14px; color:var(--muted)}
@@ -108,25 +105,6 @@ select{
 .skeleton{height:18px; border-radius:10px; background:rgba(255,255,255,.09);}
 .skeleton.small{width:60%; margin-top:8px;}
 
-.poster{
-  height:100%;
-  border-radius:20px;
-  padding:16px;
-  background:
-    radial-gradient(700px 420px at 10% 10%, rgba(34,197,94,.25), transparent 55%),
-    radial-gradient(520px 320px at 90% 20%, rgba(167,139,250,.28), transparent 55%),
-    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
-  border:1px solid rgba(255,255,255,.14);
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  gap:6px;
-}
-.posterTop{color:var(--muted); font-size:12px}
-.posterBig{font-size:34px; font-weight:900; letter-spacing:.3px}
-.posterLine{color:var(--muted)}
-.posterEmojis{font-size:26px; margin-top:10px}
-
 .boardWrap{margin-top:16px;}
 .boardCard{padding:14px;}
 .boardHeader{display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:10px;}
@@ -147,6 +125,7 @@ select{
 .cell.ladder{border-color: rgba(34,197,94,.25);}
 .cellNum{position:absolute; top:6px; left:8px; font-size:11px; color:rgba(255,255,255,.65)}
 .cellJump{position:absolute; top:6px; right:8px; font-size:11px; color:rgba(255,255,255,.70)}
+.cellWin{position:absolute; top:22px; right:8px; font-size:16px; opacity:.95}
 .cellOcc{position:absolute; bottom:6px; left:8px; display:flex; gap:4px; flex-wrap:wrap;}
 
 .playersRow{display:flex; gap:10px; align-items:center;}

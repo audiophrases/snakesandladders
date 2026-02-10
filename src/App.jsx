@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+
+const STORAGE_KEY = 'snl_state_v1';
 import './App.css';
 import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL, TASKS_SHEET_URL } from './config';
 import { fetchTasks, listGamePacks, weightedPick } from './tasks';
@@ -102,9 +104,34 @@ export default function App() {
   const [players, setPlayers] = useState(() => Array.from({ length: 2 }, (_, i) => ({ name: `P${i + 1}`, pos: 0 })));
   const [turn, setTurn] = useState(0);
   const [pending, setPending] = useState(null); // { roll, taskId }
+  const [hydrated, setHydrated] = useState(false);
 
   // "session" rng
   const rng = useMemo(() => mulberry32(Date.now() & 0xffffffff), []);
+
+  // Load saved session state (local)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s && typeof s === 'object') {
+          if (typeof s.pack === 'string') setPack(s.pack);
+          if (typeof s.dice === 'number') setDice(s.dice);
+          if (typeof s.turn === 'number') setTurn(s.turn);
+          if (typeof s.numPlayers === 'number') setNumPlayers(s.numPlayers);
+          if (Array.isArray(s.players)) setPlayers(s.players);
+          if (Array.isArray(s.history)) setHistory(s.history);
+          if (typeof s.showAnswer === 'boolean') setShowAnswer(s.showAnswer);
+          if (s.pending && typeof s.pending === 'object') setPending(s.pending);
+        }
+      }
+    } catch {
+      // ignore corrupt storage
+    } finally {
+      setHydrated(true);
+    }
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -116,7 +143,8 @@ export default function App() {
         if (!alive) return;
         setTasks(data);
         const packs = listGamePacks(data);
-        setPack(packs[0]?.name || 'General');
+        // If no pack chosen (fresh start), pick the first available.
+        setPack((p) => p || (packs[0]?.name || 'General'));
       } catch (e) {
         if (!alive) return;
         setError(e?.message || String(e));
@@ -141,6 +169,27 @@ export default function App() {
   const current = history[0] || null;
 
   const boardCells = useMemo(() => buildBoardCells(BOARD_SIZE), []);
+
+  // Persist session state locally
+  useEffect(() => {
+    if (!hydrated) return;
+    const state = {
+      pack,
+      dice,
+      turn,
+      numPlayers,
+      players,
+      pending,
+      history,
+      showAnswer,
+      savedAt: Date.now(),
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // ignore quota / storage errors
+    }
+  }, [hydrated, pack, dice, turn, numPlayers, players, pending, history, showAnswer]);
 
   function roll() {
     const value = 1 + Math.floor(rng() * 6);
@@ -253,9 +302,7 @@ export default function App() {
         <section className="hero">
           <div className="hero-left">
             <h1>Snakes & Ladders — ESL practice</h1>
-            <p className="muted">
-              Roll, do the challenge, mark success, move.
-            </p>
+            <p className="muted">Roll, do the challenge, mark success, move.</p>
 
             <div className="controls">
               <div className="control">
@@ -331,14 +378,6 @@ export default function App() {
             ) : null}
           </div>
 
-          <div className="hero-right">
-            <div className="poster">
-              <div className="posterTop">Today’s vibe</div>
-              <div className="posterBig">Therefore…</div>
-              <div className="posterLine">so / because / however / but</div>
-              <div className="posterEmojis">🗣️✨📚</div>
-            </div>
-          </div>
         </section>
 
         <section className="boardWrap">
@@ -360,6 +399,7 @@ export default function App() {
                 return (
                   <div key={n} className={`cell ${jumpKind}`} role="gridcell">
                     <div className="cellNum">{n}</div>
+                    {n === BOARD_SIZE ? <div className="cellWin">🏁</div> : null}
                     {jumpTo ? (
                       <div className="cellJump">
                         {jumpTo > n ? '🪜' : '🐍'} {n}→{jumpTo}
