@@ -52,7 +52,7 @@ function pickEvenly(entries, count) {
   return picked.sort((a, b) => a.start - b.start);
 }
 
-const CATALAN_EMOJI = '🔴🟡';
+const CATALAN_EMOJI = '🥘';
 
 const TYPE_ICON = {
   speaking: '🗣️',
