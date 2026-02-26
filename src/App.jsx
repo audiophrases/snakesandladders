@@ -25,11 +25,40 @@ const BASE_JUMPS_100 = {
   99: 78,
 };
 
+const BASE_JUMP_ENTRIES = Object.entries(BASE_JUMPS_100)
+  .map(([start, end]) => ({ start: Number(start), end: Number(end) }))
+  .sort((a, b) => a.start - b.start);
+
+const BASE_LADDERS = BASE_JUMP_ENTRIES.filter((j) => j.end > j.start);
+const BASE_SNAKES = BASE_JUMP_ENTRIES.filter((j) => j.end < j.start);
+
+function pickEvenly(entries, count) {
+  if (!entries.length || count <= 0) return [];
+  if (count >= entries.length) return entries.slice();
+
+  const picked = [];
+  const used = new Set();
+  for (let i = 0; i < count; i++) {
+    const raw = Math.floor(((i + 0.5) * entries.length) / count);
+    let idx = clamp(raw, 0, entries.length - 1);
+
+    while (used.has(idx) && idx < entries.length - 1) idx += 1;
+    while (used.has(idx) && idx > 0) idx -= 1;
+
+    used.add(idx);
+    picked.push(entries[idx]);
+  }
+
+  return picked.sort((a, b) => a.start - b.start);
+}
+
+const CATALAN_EMOJI = '🟨🟥🟨🟥';
+
 const TYPE_ICON = {
   speaking: '🗣️',
   error_correction: '🛠️',
-  translate_ca_en: '🇨🇦➡️🇬🇧',
-  translate_en_ca: '🇬🇧➡️🇨🇦',
+  translate_ca_en: `${CATALAN_EMOJI}➡️🇺🇸`,
+  translate_en_ca: `🇺🇸➡️${CATALAN_EMOJI}`,
 };
 
 function clamp(n, a, b) {
@@ -102,8 +131,34 @@ function buildJumps(boardSize) {
     out[s] = e;
   };
 
-  for (const [sStr, end] of Object.entries(BASE_JUMPS_100)) {
-    const start = Number(sStr);
+  // Keep snakes/ladders proportional to board length.
+  // Example: 100-cell board keeps all base jumps; 40-cell board keeps ~40%.
+  const ratio = boardSize / 100;
+  const baseTotal = BASE_JUMP_ENTRIES.length;
+  const targetTotal = clamp(Math.round(baseTotal * ratio), 2, baseTotal);
+
+  let laddersCount = Math.max(1, Math.round(BASE_LADDERS.length * ratio));
+  let snakesCount = Math.max(1, Math.round(BASE_SNAKES.length * ratio));
+
+  while (laddersCount + snakesCount > targetTotal) {
+    if (snakesCount >= laddersCount && snakesCount > 1) snakesCount -= 1;
+    else if (laddersCount > 1) laddersCount -= 1;
+    else snakesCount -= 1;
+  }
+
+  while (laddersCount + snakesCount < targetTotal) {
+    if (snakesCount < BASE_SNAKES.length && snakesCount <= laddersCount) snakesCount += 1;
+    else if (laddersCount < BASE_LADDERS.length) laddersCount += 1;
+    else if (snakesCount < BASE_SNAKES.length) snakesCount += 1;
+    else break;
+  }
+
+  const selected = [
+    ...pickEvenly(BASE_LADDERS, laddersCount),
+    ...pickEvenly(BASE_SNAKES, snakesCount),
+  ].sort((a, b) => a.start - b.start);
+
+  for (const { start, end } of selected) {
     const kind = end > start ? 'ladder' : 'snake';
 
     let s = scaleCell(start, boardSize);
