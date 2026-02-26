@@ -1,16 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-
-const STORAGE_KEY = 'snl_state_v2';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL } from './config';
 import { fetchTasks, listGamePacks, weightedPick } from './tasks';
 
-const DEFAULT_BOARD_SIZE = 100; // max
+const STORAGE_KEY = 'snl_party_v3';
+const DEFAULT_BOARD_SIZE = 100;
 
-// Base snakes & ladders for size=100. We'll scale these down for smaller boards.
-// Format: start -> end
+// start -> end
 const BASE_JUMPS_100 = {
-  // ladders
   4: 14,
   9: 31,
   20: 38,
@@ -18,7 +15,6 @@ const BASE_JUMPS_100 = {
   40: 59,
   63: 81,
   71: 91,
-  // snakes
   17: 7,
   54: 34,
   62: 19,
@@ -29,81 +25,20 @@ const BASE_JUMPS_100 = {
   99: 78,
 };
 
+const TYPE_ICON = {
+  speaking: '🗣️',
+  error_correction: '🛠️',
+  translate_ca_en: '🇨🇦➡️🇬🇧',
+  translate_en_ca: '🇬🇧➡️🇨🇦',
+};
+
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
-}
-
-function buildJumps(boardSize) {
-  if (boardSize === 100) return { ...BASE_JUMPS_100 };
-  const scale = boardSize / 100;
-
-  const out = {};
-  const usedStarts = new Set();
-
-  const add = (s, e) => {
-    if (!Number.isFinite(s) || !Number.isFinite(e)) return;
-    if (s <= 1 || s >= boardSize) return;
-    if (e <= 1 || e >= boardSize) return;
-    if (e === s) return;
-    if (usedStarts.has(s)) return;
-    usedStarts.add(s);
-    out[s] = e;
-  };
-
-  for (const [startStr, end] of Object.entries(BASE_JUMPS_100)) {
-    const start = parseInt(startStr, 10);
-    const kind = end > start ? 'ladder' : 'snake';
-
-    // scaled positions
-    let s = Math.round(start * scale);
-    let e = Math.round(end * scale);
-
-    s = clamp(s, 2, boardSize - 2);
-
-    // preserve direction and ensure a minimum jump distance
-    const minDelta = Math.max(3, Math.round(6 * scale));
-    if (kind === 'ladder') {
-      e = clamp(Math.max(e, s + minDelta), 2, boardSize - 1);
-    } else {
-      e = clamp(Math.min(e, s - minDelta), 2, boardSize - 1);
-    }
-
-    // avoid landing exactly on final square (keeps win clean)
-    if (e === boardSize) e = boardSize - 1;
-
-    add(s, e);
-  }
-
-  return out;
-}
-
-function boardRows(boardSize, cols = 10) {
-  return Math.max(1, Math.ceil(boardSize / cols));
-}
-
-function buildBoardCells(boardSize, cols = 10) {
-  // Returns an array of numbers (or null) in visual grid order (top-left to bottom-right),
-  // with boustrophedon rows.
-  const rows = boardRows(boardSize, cols);
-  const cells = [];
-
-  let n = boardSize;
-  for (let r = 0; r < rows; r++) {
-    const row = [];
-    for (let c = 0; c < cols; c++) {
-      if (n >= 1) row.push(n--);
-      else row.push(null);
-    }
-    if (r % 2 === 1) row.reverse();
-    cells.push(...row);
-  }
-  return cells;
 }
 
 function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
-
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -116,9 +51,125 @@ function mulberry32(seed) {
   };
 }
 
-function Dice({ value }) {
+function boardRows(boardSize, cols = 10) {
+  return Math.max(1, Math.ceil(boardSize / cols));
+}
+
+function buildBoardCells(boardSize, cols = 10) {
+  const rows = boardRows(boardSize, cols);
+  const cells = [];
+  let n = boardSize;
+
+  for (let r = 0; r < rows; r++) {
+    const row = [];
+    for (let c = 0; c < cols; c++) {
+      if (n >= 1) row.push(n--);
+      else row.push(null);
+    }
+    if (r % 2 === 1) row.reverse();
+    cells.push(...row);
+  }
+
+  return cells;
+}
+
+function buildNumberToGrid(boardCells, cols = 10) {
+  const map = new Map();
+  boardCells.forEach((n, i) => {
+    if (n == null) return;
+    map.set(n, { row: Math.floor(i / cols), col: i % cols });
+  });
+  return map;
+}
+
+function scaleCell(n, boardSize) {
+  return clamp(Math.round(n * (boardSize / 100)), 2, boardSize - 1);
+}
+
+function buildJumps(boardSize) {
+  if (boardSize === 100) return { ...BASE_JUMPS_100 };
+
+  const out = {};
+  const usedStarts = new Set();
+  const minDelta = Math.max(3, Math.round(6 * (boardSize / 100)));
+
+  const add = (s, e) => {
+    if (s <= 1 || s >= boardSize) return;
+    if (e <= 1 || e >= boardSize) return;
+    if (s === e) return;
+    if (usedStarts.has(s)) return;
+    usedStarts.add(s);
+    out[s] = e;
+  };
+
+  for (const [sStr, end] of Object.entries(BASE_JUMPS_100)) {
+    const start = Number(sStr);
+    const kind = end > start ? 'ladder' : 'snake';
+
+    let s = scaleCell(start, boardSize);
+    let e = scaleCell(end, boardSize);
+
+    if (kind === 'ladder') e = clamp(Math.max(e, s + minDelta), 2, boardSize - 1);
+    else e = clamp(Math.min(e, s - minDelta), 2, boardSize - 1);
+
+    add(s, e);
+  }
+
+  return out;
+}
+
+function buildSpecialCells(boardSize, jumps) {
+  const jumpOccupied = new Set();
+  Object.entries(jumps).forEach(([s, e]) => {
+    jumpOccupied.add(Number(s));
+    jumpOccupied.add(Number(e));
+  });
+
+  const seed = [
+    { n: 7, kind: 'boost' },
+    { n: 16, kind: 'boost' },
+    { n: 43, kind: 'boost' },
+    { n: 23, kind: 'trap' },
+    { n: 51, kind: 'trap' },
+    { n: 79, kind: 'trap' },
+    { n: 33, kind: 'freeze' },
+    { n: 68, kind: 'freeze' },
+    { n: 90, kind: 'lucky' },
+  ];
+
+  const out = {};
+  for (const item of seed) {
+    const cell = scaleCell(item.n, boardSize);
+    if (cell <= 1 || cell >= boardSize) continue;
+    if (jumpOccupied.has(cell)) continue;
+    out[cell] = item.kind;
+  }
+
+  return out;
+}
+
+function typeLabel(t) {
+  if (t === 'speaking') return 'Speak';
+  if (t === 'error_correction') return 'Fix';
+  if (t === 'translate_ca_en') return 'CA → EN';
+  if (t === 'translate_en_ca') return 'EN → CA';
+  return t || 'Task';
+}
+
+function PlayerChip({ idx, active, tiny = false }) {
+  const colors = ['#a855f7', '#22c55e', '#3b82f6', '#f97316', '#f43f5e', '#14b8a6'];
   return (
-    <div className="dice" aria-label={`Dice shows ${value}`}>
+    <span
+      className={`pchip ${active ? 'active' : ''} ${tiny ? 'tiny' : ''}`}
+      style={{ background: colors[idx % colors.length] }}
+      aria-label={`Player ${idx + 1}`}
+    />
+  );
+}
+
+function Dice({ value, rolling }) {
+  return (
+    <div className={`dice ${rolling ? 'rolling' : ''}`} aria-label={`Dice ${value}`}>
       <div className={`pipgrid pips-${value}`}>
         {Array.from({ length: 9 }).map((_, i) => (
           <span key={i} className="pip" />
@@ -128,156 +179,108 @@ function Dice({ value }) {
   );
 }
 
-function Badge({ children }) {
-  return <span className="badge">{children}</span>;
-}
+function JumpOverlay({ boardCells, boardSize, jumps }) {
+  const cols = 10;
+  const rows = boardRows(boardSize, cols);
+  const map = useMemo(() => buildNumberToGrid(boardCells, cols), [boardCells]);
 
-function Collapsible({ title, defaultOpen = true, right, children }) {
+  const toPct = (cell) => {
+    const p = map.get(cell);
+    if (!p) return null;
+    const x = ((p.col + 0.5) / cols) * 100;
+    const y = ((p.row + 0.5) / rows) * 100;
+    return { x, y };
+  };
+
   return (
-    <details className="collapsible" open={defaultOpen}>
-      <summary className="collapsibleSummary">
-        <span className="collapsibleTitle">{title}</span>
-        {right ? <span className="collapsibleRight">{right}</span> : null}
-      </summary>
-      <div className="collapsibleBody">{children}</div>
-    </details>
+    <svg className="jumpOverlay" viewBox={`0 0 100 100`} preserveAspectRatio="none" aria-hidden>
+      {Object.entries(jumps).map(([sStr, e]) => {
+        const s = Number(sStr);
+        const a = toPct(s);
+        const b = toPct(e);
+        if (!a || !b) return null;
+
+        const ladder = e > s;
+        const stroke = ladder ? '#7dd3fc' : '#fb7185';
+        const width = ladder ? 0.65 : 0.75;
+
+        if (ladder) {
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const nx = (-dy / len) * 0.7;
+          const ny = (dx / len) * 0.7;
+
+          const x1 = a.x + nx;
+          const y1 = a.y + ny;
+          const x2 = b.x + nx;
+          const y2 = b.y + ny;
+          const x3 = a.x - nx;
+          const y3 = a.y - ny;
+          const x4 = b.x - nx;
+          const y4 = b.y - ny;
+
+          const rungs = [];
+          for (let t = 0.18; t <= 0.82; t += 0.18) {
+            const rx1 = x1 + (x2 - x1) * t;
+            const ry1 = y1 + (y2 - y1) * t;
+            const rx2 = x3 + (x4 - x3) * t;
+            const ry2 = y3 + (y4 - y3) * t;
+            rungs.push(<line key={`${s}-${e}-r-${t}`} x1={rx1} y1={ry1} x2={rx2} y2={ry2} stroke={stroke} strokeWidth="0.35" opacity="0.6" />);
+          }
+
+          return (
+            <g key={`${s}-${e}`} className="ladderPath">
+              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={width} opacity="0.65" strokeLinecap="round" />
+              <line x1={x3} y1={y3} x2={x4} y2={y4} stroke={stroke} strokeWidth={width} opacity="0.65" strokeLinecap="round" />
+              {rungs}
+            </g>
+          );
+        }
+
+        const cx = (a.x + b.x) / 2;
+        const cy = (a.y + b.y) / 2 - 4;
+        const path = `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`;
+        return <path key={`${s}-${e}`} d={path} fill="none" stroke={stroke} strokeWidth={width} opacity="0.55" strokeLinecap="round" />;
+      })}
+    </svg>
   );
 }
-
-function typeLabel(t) {
-  if (t === 'speaking') return 'Speaking';
-  if (t === 'error_correction') return 'Fix the mistake';
-  if (t === 'translate_ca_en') return 'Translate (CA → EN)';
-  if (t === 'translate_en_ca') return 'Translate (EN → CA)';
-  return t;
-}
-
-function PlayerChip({ idx, active }) {
-  const colors = ['#a78bfa', '#22c55e', '#60a5fa', '#fb7185', '#f59e0b', '#14b8a6'];
-  return (
-    <span
-      className={`pchip ${active ? 'active' : ''}`}
-      style={{ background: colors[idx % colors.length] }}
-      title={`Player ${idx + 1}`}
-    />
-  );
-}
-
-// (board cells builder is defined above as buildBoardCells(boardSize, cols))
 
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tasks, setTasks] = useState([]);
-  const [pack, setPack] = useState('');
+
   const [selectedPacks, setSelectedPacks] = useState([]);
-  const [showAnswer, setShowAnswer] = useState(false);
-  const [dice, setDice] = useState(1);
-  const [history, setHistory] = useState([]);
-
-  const [boardSize, setBoardSize] = useState(DEFAULT_BOARD_SIZE);
-
-  const [numPlayers, setNumPlayers] = useState(2);
-  const [players, setPlayers] = useState(() => Array.from({ length: 2 }, (_, i) => ({ name: `P${i + 1}`, pos: 0 })));
-  const [turn, setTurn] = useState(0);
-  const [pending, setPending] = useState(null); // { roll, taskId }
-  const [hydrated, setHydrated] = useState(false);
-  const [animating, setAnimating] = useState(false);
-
   const [selectedLevels, setSelectedLevels] = useState([]);
 
-  // "session" rng
+  const [boardSize, setBoardSize] = useState(DEFAULT_BOARD_SIZE);
+  const [numPlayers, setNumPlayers] = useState(2);
+  const [players, setPlayers] = useState(() => [
+    { name: 'P1', pos: 0, skip: 0 },
+    { name: 'P2', pos: 0, skip: 0 },
+  ]);
+  const [turn, setTurn] = useState(0);
+
+  const [dice, setDice] = useState(1);
+  const [rolling, setRolling] = useState(false);
+  const [animating, setAnimating] = useState(false);
+
+  const [history, setHistory] = useState([]);
+  const [pending, setPending] = useState(null); // { roll, taskId }
+  const [showAnswer, setShowAnswer] = useState(false);
+
+  const [notice, setNotice] = useState('🎉 Roll the dice and play!');
+  const [bursts, setBursts] = useState([]); // {id, emoji, x, y}
+  const [soundOn, setSoundOn] = useState(true);
+  const audioCtxRef = useRef(null);
+
+  const [hydrated, setHydrated] = useState(false);
+
   const rng = useMemo(() => mulberry32(Date.now() & 0xffffffff), []);
 
-  // Load saved session state (local)
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (s && typeof s === 'object') {
-          if (typeof s.pack === 'string') setPack(s.pack);
-          if (Array.isArray(s.selectedPacks)) setSelectedPacks(s.selectedPacks);
-          if (typeof s.dice === 'number') setDice(s.dice);
-          if (typeof s.turn === 'number') setTurn(s.turn);
-          if (typeof s.numPlayers === 'number') setNumPlayers(s.numPlayers);
-          if (Array.isArray(s.players)) setPlayers(s.players);
-          if (Array.isArray(s.history)) setHistory(s.history);
-          if (typeof s.showAnswer === 'boolean') setShowAnswer(s.showAnswer);
-          if (s.pending && typeof s.pending === 'object') setPending(s.pending);
-          if (typeof s.boardSize === 'number') setBoardSize(clamp(s.boardSize, 40, 100));
-          if (Array.isArray(s.selectedLevels)) setSelectedLevels(s.selectedLevels);
-        }
-      }
-    } catch {
-      // ignore corrupt storage
-    } finally {
-      setHydrated(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
-        setError('');
-        const data = await fetchTasks(TASKS_CSV_URL);
-        if (!alive) return;
-        setTasks(data);
-        const packs = listGamePacks(data);
-        // If no pack chosen (fresh start), pick the first available.
-        setPack((p) => p || (packs[0]?.name || 'General'));
-      } catch (e) {
-        if (!alive) return;
-        setError(e?.message || String(e));
-      } finally {
-        if (!alive) return;
-        setLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
   const packs = useMemo(() => listGamePacks(tasks), [tasks]);
-
-  function togglePack(name) {
-    setSelectedPacks((prev) => {
-      const set = new Set(prev || []);
-      if (set.has(name)) set.delete(name);
-      else set.add(name);
-      return Array.from(set);
-    });
-  }
-
-  function clearPacks() {
-    setSelectedPacks([]);
-    setPack('');
-  }
-
-  function selectAllPacks() {
-    setSelectedPacks(packs.map((p) => p.name));
-    setPack('');
-  }
-
-  function toggleLevel(lv) {
-    setSelectedLevels((prev) => {
-      const set = new Set(prev || []);
-      if (set.has(lv)) set.delete(lv);
-      else set.add(lv);
-      return Array.from(set);
-    });
-  }
-
-  function clearLevels() {
-    setSelectedLevels([]);
-  }
-
-  function selectAllLevels() {
-    setSelectedLevels(levels.slice());
-  }
 
   const levels = useMemo(() => {
     const set = new Set();
@@ -293,19 +296,14 @@ export default function App() {
   }, [tasks]);
 
   const filtered = useMemo(() => {
-    const legacy = (pack || '').trim();
-    const chosen = (selectedPacks || []).filter(Boolean);
-
-    // Backward compatibility: if only legacy 'pack' is set, treat it as the selection.
-    const effective = chosen.length ? chosen : (legacy ? [legacy] : []);
-
     let out = tasks;
-    if (effective.length) {
-      const set = new Set(effective);
+
+    if (selectedPacks.length) {
+      const set = new Set(selectedPacks);
       out = out.filter((t) => set.has(t.focus || 'General'));
     }
 
-    if ((selectedLevels || []).length) {
+    if (selectedLevels.length) {
       const set = new Set(selectedLevels);
       out = out.filter((t) => {
         const lv = (t.level || '').trim();
@@ -315,102 +313,397 @@ export default function App() {
     }
 
     return out;
-  }, [tasks, pack, selectedPacks, selectedLevels]);
+  }, [tasks, selectedPacks, selectedLevels]);
 
   const current = history[0] || null;
 
-  const packLabel = useMemo(() => {
-    const chosen = (selectedPacks || []).filter(Boolean);
-    if (chosen.length > 1) return `Mixed (${chosen.length})`;
-    if (chosen.length === 1) return chosen[0];
-    return (pack || 'General').trim() || 'General';
-  }, [pack, selectedPacks]);
-
-  const jumps = useMemo(() => buildJumps(boardSize), [boardSize]);
   const boardCells = useMemo(() => buildBoardCells(boardSize, 10), [boardSize]);
   const rows = useMemo(() => boardRows(boardSize, 10), [boardSize]);
+  const jumps = useMemo(() => buildJumps(boardSize), [boardSize]);
+  const specials = useMemo(() => buildSpecialCells(boardSize, jumps), [boardSize, jumps]);
 
-  // Persist session state locally
+  const winnerIdx = useMemo(() => players.findIndex((p) => p.pos === boardSize), [players, boardSize]);
+
+  // --- Sound ---
+  const ensureAudio = () => {
+    if (!audioCtxRef.current) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      audioCtxRef.current = new Ctx();
+    }
+    return audioCtxRef.current;
+  };
+
+  const beep = async (freq, ms, type = 'sine', gain = 0.04) => {
+    const ctx = ensureAudio();
+    if (!ctx || !soundOn) return;
+    if (ctx.state === 'suspended') await ctx.resume();
+
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.value = gain;
+    o.connect(g);
+    g.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    g.gain.setValueAtTime(gain, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + ms / 1000);
+    o.start(now);
+    o.stop(now + ms / 1000);
+  };
+
+  const playSfx = async (kind) => {
+    if (!soundOn) return;
+    if (kind === 'roll') {
+      await beep(320, 70, 'triangle', 0.04);
+      await sleep(50);
+      await beep(420, 70, 'triangle', 0.04);
+      return;
+    }
+    if (kind === 'success') {
+      await beep(520, 80, 'sine', 0.05);
+      await sleep(55);
+      await beep(700, 110, 'sine', 0.05);
+      return;
+    }
+    if (kind === 'fail') {
+      await beep(260, 120, 'sawtooth', 0.045);
+      return;
+    }
+    if (kind === 'ladder') {
+      await beep(500, 80, 'square', 0.045);
+      await sleep(45);
+      await beep(650, 90, 'square', 0.045);
+      await sleep(45);
+      await beep(830, 110, 'square', 0.045);
+      return;
+    }
+    if (kind === 'snake') {
+      await beep(380, 100, 'sawtooth', 0.04);
+      await sleep(35);
+      await beep(260, 130, 'sawtooth', 0.04);
+      return;
+    }
+    if (kind === 'win') {
+      await beep(620, 110, 'triangle', 0.05);
+      await sleep(40);
+      await beep(780, 110, 'triangle', 0.05);
+      await sleep(40);
+      await beep(980, 170, 'triangle', 0.05);
+      return;
+    }
+    if (kind === 'freeze') {
+      await beep(410, 80, 'sine', 0.04);
+      await sleep(50);
+      await beep(310, 120, 'sine', 0.04);
+    }
+  };
+
+  // --- Bursts ---
+  const spawnBurst = (emoji = '✨', count = 12) => {
+    const idBase = Date.now() + Math.random();
+    const items = Array.from({ length: count }).map((_, i) => ({
+      id: `${idBase}-${i}`,
+      emoji,
+      x: 28 + Math.random() * 44,
+      y: 35 + Math.random() * 35,
+      dx: -60 + Math.random() * 120,
+      dy: -120 - Math.random() * 120,
+      rot: -80 + Math.random() * 160,
+      life: 900 + Math.random() * 500,
+    }));
+
+    setBursts((prev) => [...prev, ...items]);
+
+    items.forEach((b) => {
+      setTimeout(() => {
+        setBursts((prev) => prev.filter((x) => x.id !== b.id));
+      }, b.life);
+    });
+  };
+
+  // --- Load/save ---
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s && typeof s === 'object') {
+          if (Array.isArray(s.selectedPacks)) setSelectedPacks(s.selectedPacks);
+          if (Array.isArray(s.selectedLevels)) setSelectedLevels(s.selectedLevels);
+          if (typeof s.boardSize === 'number') setBoardSize(clamp(s.boardSize, 40, 100));
+          if (typeof s.numPlayers === 'number') setNumPlayers(clamp(s.numPlayers, 1, 6));
+          if (Array.isArray(s.players)) setPlayers(s.players);
+          if (typeof s.turn === 'number') setTurn(s.turn);
+          if (Array.isArray(s.history)) setHistory(s.history);
+          if (s.pending && typeof s.pending === 'object') setPending(s.pending);
+          if (typeof s.showAnswer === 'boolean') setShowAnswer(s.showAnswer);
+          if (typeof s.soundOn === 'boolean') setSoundOn(s.soundOn);
+          if (typeof s.notice === 'string') setNotice(s.notice);
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setLoading(true);
+        setError('');
+        const data = await fetchTasks(TASKS_CSV_URL);
+        if (!alive) return;
+        setTasks(data);
+      } catch (e) {
+        if (!alive) return;
+        setError(e?.message || String(e));
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (!hydrated) return;
     const state = {
-      pack,
       selectedPacks,
       selectedLevels,
       boardSize,
-      dice,
-      turn,
       numPlayers,
       players,
-      pending,
+      turn,
       history,
+      pending,
       showAnswer,
+      soundOn,
+      notice,
       savedAt: Date.now(),
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
-      // ignore quota / storage errors
+      // ignore
     }
-  }, [hydrated, pack, selectedPacks, selectedLevels, boardSize, dice, turn, numPlayers, players, pending, history, showAnswer]);
+  }, [
+    hydrated,
+    selectedPacks,
+    selectedLevels,
+    boardSize,
+    numPlayers,
+    players,
+    turn,
+    history,
+    pending,
+    showAnswer,
+    soundOn,
+    notice,
+  ]);
 
-  function roll() {
-    const value = 1 + Math.floor(rng() * 6);
-    setDice(value);
-    return value;
-  }
+  // --- Controls ---
+  const setPlayerCount = (n) => {
+    const clamped = clamp(n, 1, 6);
+    setNumPlayers(clamped);
+    setTurn(0);
+    setPending(null);
+    setPlayers((prev) => {
+      const next = [];
+      for (let i = 0; i < clamped; i++) {
+        next.push({
+          name: prev[i]?.name || `P${i + 1}`,
+          pos: prev[i]?.pos || 0,
+          skip: prev[i]?.skip || 0,
+        });
+      }
+      return next;
+    });
+  };
 
-  function drawTask(rollValue) {
-    // balance across types: downweight types that were just used.
+  const setPlayerName = (idx, name) => {
+    setPlayers((prev) => {
+      const next = prev.map((p) => ({ ...p }));
+      if (!next[idx]) return prev;
+      next[idx].name = (name || '').slice(0, 20);
+      return next;
+    });
+  };
+
+  const resetSession = () => {
+    setHistory([]);
+    setShowAnswer(false);
+    setPending(null);
+    setTurn(0);
+    setDice(1 + Math.floor(rng() * 6));
+    setNotice('🎉 New game! Roll the dice.');
+    setPlayers((ps) => ps.map((p, i) => ({ ...p, pos: 0, skip: 0, name: p.name || `P${i + 1}` })));
+    spawnBurst('✨', 10);
+  };
+
+  const setBoardSizeAndReset = (n) => {
+    const s = clamp(n, 40, 100);
+    setBoardSize(s);
+    setPending(null);
+    setTurn(0);
+    setDice(1 + Math.floor(rng() * 6));
+    setHistory([]);
+    setShowAnswer(false);
+    setNotice(`🎲 Board ${s}`);
+    setPlayers((ps) => ps.map((p, i) => ({ ...p, pos: 0, skip: 0, name: p.name || `P${i + 1}` })));
+  };
+
+  const togglePack = (name) => {
+    setSelectedPacks((prev) => {
+      const set = new Set(prev || []);
+      if (set.has(name)) set.delete(name);
+      else set.add(name);
+      return Array.from(set);
+    });
+  };
+
+  const toggleLevel = (lv) => {
+    setSelectedLevels((prev) => {
+      const set = new Set(prev || []);
+      if (set.has(lv)) set.delete(lv);
+      else set.add(lv);
+      return Array.from(set);
+    });
+  };
+
+  const drawTask = (rollValue) => {
     const recent = history.slice(0, 4).map((h) => h.type);
     const counts = recent.reduce((m, t) => ((m[t] = (m[t] || 0) + 1), m), {});
 
-    const candidates = filtered.filter((t) => !history.slice(0, 10).some((h) => h.id === t.id));
+    const candidates = filtered.filter((t) => !history.slice(0, 12).some((h) => h.id === t.id));
     const pool = candidates.length ? candidates : filtered;
 
     return weightedPick(rng, pool, (t) => {
       const base = DEFAULT_TYPE_WEIGHTS[t.type] || 1;
       const penalty = 1 / (1 + (counts[t.type] || 0));
-      // dice spice
       const spice =
         rollValue === 6 && t.type === 'speaking'
-          ? 1.4
+          ? 1.35
           : rollValue === 1 && t.type === 'error_correction'
-            ? 1.4
-            : 1;
+          ? 1.3
+          : 1;
       return base * penalty * spice;
     });
-  }
+  };
 
-  function rollAndDraw() {
-    if (animating) return;
-    if (!filtered.length) return;
-    if (!players.length) return;
+  const rollAnimated = async () => {
+    setRolling(true);
+    await playSfx('roll');
+    let val = dice;
+    const spins = 8;
+    for (let i = 0; i < spins; i++) {
+      val = 1 + Math.floor(rng() * 6);
+      setDice(val);
+      await sleep(70);
+    }
+    setRolling(false);
+    return val;
+  };
 
-    const value = roll();
+  const rollAndDraw = async () => {
+    if (animating || rolling || winnerIdx >= 0) return;
+    if (!filtered.length || !players.length) return;
+
+    // skip-turn effect
+    const currentPlayer = players[turn];
+    if ((currentPlayer?.skip || 0) > 0) {
+      setPlayers((ps) => {
+        const next = ps.map((p) => ({ ...p }));
+        if (next[turn]) next[turn].skip = Math.max(0, (next[turn].skip || 0) - 1);
+        return next;
+      });
+      setTurn((t) => (players.length ? (t + 1) % players.length : 0));
+      setNotice(`🧊 ${currentPlayer.name} skips this turn`);
+      await playSfx('freeze');
+      return;
+    }
+
+    const value = await rollAnimated();
     const picked = drawTask(value);
 
     setShowAnswer(false);
-    setHistory((h) => [picked, ...h].slice(0, 50));
+    setHistory((h) => [picked, ...h].slice(0, 60));
     setPending({ roll: value, taskId: picked.id });
-  }
+    setNotice(`${TYPE_ICON[picked.type] || '🎯'} ${typeLabel(picked.type)}`);
+  };
 
-  async function applyMove(success) {
-    if (!pending || !current) return;
-    if (animating) return;
+  const applySpecial = async (pos) => {
+    const kind = specials[pos];
+    if (!kind) return pos;
+
+    const start = pos;
+    let end = pos;
+
+    if (kind === 'boost') {
+      end = clamp(start + 2, 1, boardSize);
+      if (end > boardSize) end = start;
+      setNotice('⭐ Boost +2');
+      spawnBurst('⭐', 12);
+      await beep(740, 90, 'triangle', 0.05);
+    } else if (kind === 'trap') {
+      end = clamp(start - 2, 1, boardSize);
+      setNotice('⚠️ Trap -2');
+      spawnBurst('💥', 10);
+      await beep(300, 110, 'sawtooth', 0.045);
+    } else if (kind === 'freeze') {
+      setPlayers((ps) => {
+        const next = ps.map((p) => ({ ...p }));
+        if (next[turn]) next[turn].skip = 1;
+        return next;
+      });
+      setNotice('🧊 Freeze! Skip next turn');
+      spawnBurst('🧊', 8);
+      await playSfx('freeze');
+    } else if (kind === 'lucky') {
+      end = clamp(start + 1, 1, boardSize);
+      setNotice('🍀 Lucky +1');
+      spawnBurst('🍀', 10);
+      await beep(830, 90, 'sine', 0.05);
+    }
+
+    if (end !== start) {
+      const step = end > start ? 1 : -1;
+      for (let p = start + step; step > 0 ? p <= end : p >= end; p += step) {
+        setPlayers((ps) => {
+          const next = ps.map((x) => ({ ...x }));
+          if (next[turn]) next[turn].pos = p;
+          return next;
+        });
+        await sleep(120);
+      }
+    }
+
+    return end;
+  };
+
+  const applyMove = async (success) => {
+    if (!pending || !current || animating || rolling || winnerIdx >= 0) return;
 
     setAnimating(true);
 
     try {
       if (success) {
+        await playSfx('success');
+
         const startPos = players[turn]?.pos || 0;
         let target = startPos + pending.roll;
 
-        // classic rule: must land exactly on final square
+        // exact landing rule
         if (target > boardSize) target = startPos;
 
-        // Step animation
-        const stepDelay = 160;
         if (target !== startPos) {
           for (let pos = startPos + 1; pos <= target; pos++) {
             setPlayers((ps) => {
@@ -418,340 +711,222 @@ export default function App() {
               if (next[turn]) next[turn].pos = pos;
               return next;
             });
-            await sleep(stepDelay);
+            await sleep(150);
           }
         } else {
-          // tiny feedback so the user feels it happened
-          await sleep(120);
+          setNotice('⛔ Need exact roll');
+          await sleep(140);
         }
 
-        // snakes/ladders jump animation
+        // snake / ladder
         const jumped = jumps[target];
+        let finalPos = target;
         if (jumped && jumped !== target) {
+          if (jumped > target) {
+            setNotice('🪜 Ladder!');
+            spawnBurst('🪜', 12);
+            await playSfx('ladder');
+          } else {
+            setNotice('🐍 Snake!');
+            spawnBurst('🐍', 10);
+            await playSfx('snake');
+          }
+
           await sleep(220);
           setPlayers((ps) => {
             const next = ps.map((p) => ({ ...p }));
             if (next[turn]) next[turn].pos = jumped;
             return next;
           });
+          finalPos = jumped;
           await sleep(220);
         }
+
+        // special cell
+        finalPos = await applySpecial(finalPos);
+
+        if (finalPos === boardSize) {
+          const name = players[turn]?.name || `P${turn + 1}`;
+          setNotice(`🏆 ${name} wins!`);
+          spawnBurst('🎉', 20);
+          await playSfx('win');
+        }
+      } else {
+        await playSfx('fail');
+        setNotice('❌ Stay put');
       }
 
-      // next player's turn
       setTurn((t) => (players.length ? (t + 1) % players.length : 0));
       setPending(null);
     } finally {
       setAnimating(false);
     }
-  }
+  };
 
-  const winnerIdx = useMemo(() => players.findIndex((p) => p.pos === boardSize), [players, boardSize]);
+  const selectedPackLabel = selectedPacks.length
+    ? selectedPacks.length === 1
+      ? selectedPacks[0]
+      : `Mix ×${selectedPacks.length}`
+    : 'All packs';
 
-  function resetSession() {
-    setHistory([]);
-    setShowAnswer(false);
-    setPending(null);
-    setTurn(0);
-    setPlayers((ps) => ps.map((p, i) => ({ ...p, pos: 0, name: p.name || `P${i + 1}` })));
-    roll();
-  }
-
-  function setBoardSizeAndReset(n) {
-    const nextSize = clamp(n, 40, 100);
-    setBoardSize(nextSize);
-    setPending(null);
-    setTurn(0);
-    setPlayers((ps) => ps.map((p, i) => ({ ...p, pos: 0, name: p.name || `P${i + 1}` })));
-    setHistory([]);
-    setShowAnswer(false);
-  }
-
-  function setPlayerCount(n) {
-    const clamped = Math.max(1, Math.min(6, n));
-    setNumPlayers(clamped);
-    setTurn(0);
-    setPending(null);
-    setPlayers((prev) => {
-      const next = [];
-      for (let i = 0; i < clamped; i++) {
-        next.push({ name: prev[i]?.name || `P${i + 1}`, pos: prev[i]?.pos || 0 });
-      }
-      return next;
-    });
-  }
-
-  function setPlayerName(idx, name) {
-    setPlayers((prev) => {
-      const next = prev.map((p) => ({ ...p }));
-      if (!next[idx]) return prev;
-      next[idx].name = (name || '').slice(0, 20);
-      return next;
-    });
-  }
+  const selectedLevelLabel = selectedLevels.length
+    ? selectedLevels.length === 1
+      ? selectedLevels[0]
+      : `Lv ×${selectedLevels.length}`
+    : 'All lv';
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <div className="brand">
-          <div className="logo">🐍🎲🪜</div>
+    <div className="gamePage">
+      <header className="hudBar">
+        <div className="brandBlock">
+          <div className="brandIcon">🐍🪜🎲</div>
           <div>
-            <div className="title">Snakes & Ladders</div>
-            <div className="subtitle">ESL Grammar + Speaking Practice</div>
+            <div className="brandTitle">Snakes & Ladders ESL</div>
+            <div className="brandSub">Play • Speak • Learn</div>
           </div>
         </div>
-        <div className="top-actions">
-          <button className="btn ghost" onClick={resetSession}>New session</button>
+
+        <div className="hudActions">
+          <button className="iconBtn" onClick={() => setSoundOn((v) => !v)} title="Sound">
+            {soundOn ? '🔊' : '🔈'}
+          </button>
+          <button className="iconBtn" onClick={resetSession} title="New game">
+            🆕
+          </button>
         </div>
       </header>
 
-      <main className="container">
-        <section className="hero">
-          <div className="hero-left">
-            <div className="turnBanner" aria-label="Current turn">
-              <div className="turnBannerLeft">
-                <span className="muted">Current turn</span>
-                <div className="turnBannerName">
-                  <PlayerChip idx={turn} active />
-                  <span>{players[turn]?.name || `P${turn + 1}`}</span>
-                </div>
-              </div>
-              <div className="turnBannerRight">
-                <span className="muted">Position</span>
-                <span className="mono">{players[turn]?.pos || 0} / {boardSize}</span>
-              </div>
-            </div>
-
-            <div className="controls">
-              <Collapsible
-                title="Language points"
-                right={<span className="muted">Selected: {(selectedPacks?.length || 0) || (pack ? 1 : 0)}</span>}
-              >
-                <div className="packBox">
-                  <div className="packTop">
-                    <div className="packTopLeft">
-                      <button className="btn ghost" type="button" onClick={clearPacks}>
-                        Clear
-                      </button>
-                      <button className="btn ghost" type="button" onClick={selectAllPacks} disabled={!packs.length}>
-                        Select all
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="packGrid">
-                    {packs.map((p) => {
-                      const checked = (selectedPacks || []).includes(p.name) || (!selectedPacks?.length && pack === p.name);
-                      return (
-                        <label key={p.name} className={`packItem ${checked ? 'on' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              // migrate from legacy single-pack state
-                              if (pack && !selectedPacks?.length) {
-                                setSelectedPacks([pack]);
-                                setPack('');
-                              }
-                              togglePack(p.name);
-                            }}
-                          />
-                          <span className="packName">{p.name}</span>
-                          <span className="muted">({p.count})</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              </Collapsible>
-
-              <Collapsible title="Players" right={<span className="muted">{numPlayers} players</span>}
->
-                <div className="playersRow">
-                  <select value={numPlayers} onChange={(e) => setPlayerCount(parseInt(e.target.value, 10))}>
-                    {[1, 2, 3, 4, 5, 6].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="playersMini">
-                    {players.map((_, i) => (
-                      <PlayerChip key={i} idx={i} active={i === turn} />
-                    ))}
-                    <span className="muted turnLabel">Turn:</span>
-                    <span className="turnNow">
-                      <PlayerChip idx={turn} active />
-                      <span className="turnName">{players[turn]?.name || `P${turn + 1}`}</span>
-                    </span>
-                  </div>
-                </div>
-
-                <div className="names">
-                  {players.map((p, i) => (
-                    <label key={i} className="nameRow">
-                      <span className="nameLeft">
-                        <PlayerChip idx={i} active={i === turn} />
-                        <span className="muted">Name</span>
-                      </span>
-                      <input
-                        className="nameInput"
-                        value={p.name || ''}
-                        onChange={(e) => setPlayerName(i, e.target.value)}
-                        placeholder={`P${i + 1}`}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </Collapsible>
-
-              <Collapsible title="Game settings" right={<span className="muted">Board: {boardSize}</span>}>
-                <div className="boardControls">
-                  <div className="boardControlRow">
-                    <span className="muted">Board size</span>
-                    <select value={boardSize} onChange={(e) => setBoardSizeAndReset(parseInt(e.target.value, 10))}>
-                      {[40, 50, 60, 70, 80, 90, 100].map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="hint">Smaller boards are faster games. Max is 100.</div>
-                </div>
-
-                <div className="levelBox" style={{ marginTop: 10 }}>
-                  <div className="packTop">
-                    <div className="packTopLeft">
-                      <button className="btn ghost" type="button" onClick={clearLevels}>
-                        Clear levels
-                      </button>
-                      <button className="btn ghost" type="button" onClick={selectAllLevels} disabled={!levels.length}>
-                        Select all levels
-                      </button>
-                    </div>
-                    <span className="muted">Selected: {selectedLevels?.length || 0}</span>
-                  </div>
-
-                  <div className="levelGrid">
-                    {levels.map((lv) => {
-                      const checked = (selectedLevels || []).includes(lv);
-                      return (
-                        <label key={lv} className={`packItem ${checked ? 'on' : ''}`}>
-                          <input type="checkbox" checked={checked} onChange={() => toggleLevel(lv)} />
-                          <span className="packName">{lv}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <div className="hint">Leave empty to include all levels.</div>
-                </div>
-              </Collapsible>
-            </div>
-
-            <div className="diceTaskRow">
-              <div className="card diceCard">
-                <div className="cardTitle">Dice</div>
-                <div className="diceRow">
-                  <Dice value={dice} />
-                  <button className="btn" onClick={rollAndDraw} disabled={loading || !!error || !filtered.length || winnerIdx >= 0 || animating}>
-                    Roll & Draw
-                  </button>
-                </div>
-                <div className="resultRow">
-                  <button className="btn success" onClick={() => applyMove(true)} disabled={!pending || winnerIdx >= 0 || animating}>Success ✅</button>
-                  <button className="btn fail" onClick={() => applyMove(false)} disabled={!pending || winnerIdx >= 0 || animating}>Fail ❌</button>
-                </div>
-                <div className="hint">Success = move by dice. Fail = stay. Exact landing required to win.</div>
-              </div>
-
-              <div className="card task taskInline">
-                <div className="taskHeader">
-                  <div className="taskMeta">
-                    <Badge>{packLabel}</Badge>
-                    {current ? <Badge>{typeLabel(current.type)}</Badge> : <Badge>Ready</Badge>}
-                    {current?.grammarTags?.slice(0, 2).map((t) => <Badge key={t}>{t}</Badge>)}
-                  </div>
-                  <div className="taskActions">
-                    <button className="btn ghost" onClick={() => setShowAnswer((v) => !v)} disabled={!current || !current.target}>
-                      {showAnswer ? 'Hide' : 'Show'} answer
-                    </button>
-                  </div>
-                </div>
-
-                <div className="taskBody">
-                  {current ? (
-                    <>
-                      <div className="prompt">{current.prompt}</div>
-                      {showAnswer && current.target ? (
-                        <div className="answer">
-                          <div className="answerLabel">Suggested answer</div>
-                          <div className="mono">{current.target}</div>
-                        </div>
-                      ) : null}
-
-                      {current.connectors?.length ? (
-                        <div className="connectors">
-                          <span className="muted">Connectors:</span> {current.connectors.join(', ')}
-                        </div>
-                      ) : null}
-
-                      {current.notes ? (
-                        <div className="notes">
-                          <span className="muted">Note:</span> {current.notes}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div className="empty">Click <strong>Roll & Draw</strong> to start.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {winnerIdx >= 0 ? (
-              <div className="card win">
-                <div className="cardTitle">Winner!</div>
-                <div className="mono">{players[winnerIdx]?.name || `P${winnerIdx + 1}`} reached {boardSize} 🎉</div>
-              </div>
-            ) : null}
-
-            {error ? (
-              <div className="card error">
-                <div className="cardTitle">Oops</div>
-                <div className="mono">{error}</div>
-                <div className="hint">
-                  If this is the first time, make sure the sheet is public and the CSV URL is reachable.
-                </div>
-              </div>
-            ) : null}
-
-            {loading ? (
-              <div className="card">
-                <div className="skeleton" />
-                <div className="skeleton small" />
-              </div>
-            ) : null}
+      <main className="layout">
+        <section className="leftPane">
+          <div className="miniStats cardy">
+            <div className="pill">{selectedPackLabel}</div>
+            <div className="pill">{selectedLevelLabel}</div>
+            <div className="pill">🎯 {filtered.length}</div>
           </div>
 
+          <details className="picker cardy" open>
+            <summary>🎒 Packs</summary>
+            <div className="pickerGrid">
+              {packs.map((p) => {
+                const checked = selectedPacks.includes(p.name);
+                return (
+                  <button key={p.name} className={`chip ${checked ? 'on' : ''}`} onClick={() => togglePack(p.name)}>
+                    <span>{p.name}</span>
+                    <em>{p.count}</em>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="pickerActions">
+              <button className="chipAction" onClick={() => setSelectedPacks([])}>Clear</button>
+              <button className="chipAction" onClick={() => setSelectedPacks(packs.map((p) => p.name))}>All</button>
+            </div>
+          </details>
+
+          <details className="picker cardy">
+            <summary>📚 Levels</summary>
+            <div className="pickerGrid levels">
+              {levels.map((lv) => {
+                const checked = selectedLevels.includes(lv);
+                return (
+                  <button key={lv} className={`chip ${checked ? 'on' : ''}`} onClick={() => toggleLevel(lv)}>
+                    <span>{lv}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="pickerActions">
+              <button className="chipAction" onClick={() => setSelectedLevels([])}>Clear</button>
+              <button className="chipAction" onClick={() => setSelectedLevels(levels.slice())}>All</button>
+            </div>
+          </details>
+
+          <div className="players cardy">
+            <div className="playersHead">
+              <span>👥</span>
+              <select value={numPlayers} onChange={(e) => setPlayerCount(parseInt(e.target.value, 10))}>
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <option key={n} value={n}>{n}P</option>
+                ))}
+              </select>
+              <select value={boardSize} onChange={(e) => setBoardSizeAndReset(parseInt(e.target.value, 10))}>
+                {[40, 50, 60, 70, 80, 90, 100].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="nameRows">
+              {players.map((p, i) => (
+                <label key={i} className={`nameRow ${i === turn ? 'active' : ''}`}>
+                  <span className="nameLead">
+                    <PlayerChip idx={i} active={i === turn} tiny />
+                    <span className="monoTiny">{p.pos}</span>
+                    {(p.skip || 0) > 0 ? <span title="Skip next turn">🧊</span> : null}
+                  </span>
+                  <input value={p.name || ''} onChange={(e) => setPlayerName(i, e.target.value)} />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="taskCard cardy">
+            <div className="taskTop">
+              <div className="taskType">{current ? `${TYPE_ICON[current.type] || '🎯'} ${typeLabel(current.type)}` : '🎯 Task'}</div>
+              <button className="tinyBtn" onClick={() => setShowAnswer((v) => !v)} disabled={!current || !current.target}>
+                {showAnswer ? '🙈' : '💡'}
+              </button>
+            </div>
+
+            <div className="taskPrompt">
+              {loading ? 'Loading…' : error ? 'Could not load tasks' : current ? current.prompt : 'Tap 🎲'}
+            </div>
+
+            {showAnswer && current?.target ? <div className="taskAnswer">{current.target}</div> : null}
+
+            <div className="taskBottom">
+              {current?.grammarTags?.slice(0, 3).map((t) => (
+                <span key={t} className="miniTag">{t}</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="actionBar cardy">
+            <Dice value={dice} rolling={rolling} />
+            <button
+              className="goBtn"
+              onClick={rollAndDraw}
+              disabled={loading || !!error || !filtered.length || winnerIdx >= 0 || animating || rolling}
+            >
+              🎲
+            </button>
+            <button className="okBtn" onClick={() => applyMove(true)} disabled={!pending || winnerIdx >= 0 || animating || rolling}>
+              ✅
+            </button>
+            <button className="noBtn" onClick={() => applyMove(false)} disabled={!pending || winnerIdx >= 0 || animating || rolling}>
+              ❌
+            </button>
+          </div>
+
+          <div className="notice cardy" role="status">{notice}</div>
+
+          {winnerIdx >= 0 ? <div className="winner cardy">🏆 {players[winnerIdx]?.name || `P${winnerIdx + 1}`}!</div> : null}
+
+          {error ? <div className="error cardy">⚠️ {error}</div> : null}
         </section>
 
-        <section className="boardWrap">
-          <div className="card boardCard">
-            <div className="boardHeader">
-              <div className="cardTitle">Board</div>
-              <div className="muted">Snakes 🐍 and ladders 🪜 are included (basic set).</div>
-            </div>
+        <section className="boardPane">
+          <div className="boardShell cardy">
+            <JumpOverlay boardCells={boardCells} boardSize={boardSize} jumps={jumps} />
+
             <div
-              className="board"
+              className="boardGrid"
               role="grid"
               aria-label="Snakes and Ladders board"
               style={{ gridTemplateColumns: 'repeat(10, 1fr)', gridTemplateRows: `repeat(${rows}, 1fr)` }}
             >
               {boardCells.map((n, idx) => {
-                if (n == null) {
-                  return <div key={`blank-${idx}`} className="cell blank" role="presentation" />;
-                }
+                if (n == null) return <div key={`blank-${idx}`} className="cell blank" />;
 
                 const occupants = players
                   .map((p, i) => ({ i, on: p.pos === n }))
@@ -759,73 +934,78 @@ export default function App() {
                   .map((x) => x.i);
 
                 const isTurnCell = players[turn]?.pos === n;
-
                 const jumpTo = jumps[n];
                 const jumpKind = jumpTo ? (jumpTo > n ? 'ladder' : 'snake') : '';
+                const special = specials[n] || '';
 
                 return (
-                  <div key={n} className={`cell ${jumpKind} ${isTurnCell ? 'turnCell' : ''}`} role="gridcell">
+                  <div key={n} className={`cell ${jumpKind} ${special} ${isTurnCell ? 'turnCell' : ''}`} role="gridcell">
                     <div className="cellNum">{n}</div>
                     {n === boardSize ? <div className="cellWin">🏁</div> : null}
-                    {jumpTo ? (
-                      <div className="cellJump">
-                        {jumpTo > n ? '🪜' : '🐍'} {n}→{jumpTo}
+                    {jumpTo ? <div className="cellIcon">{jumpTo > n ? '🪜' : '🐍'}</div> : null}
+                    {!jumpTo && special ? (
+                      <div className="cellIcon">
+                        {special === 'boost' ? '⭐' : special === 'trap' ? '⚠️' : special === 'freeze' ? '🧊' : '🍀'}
                       </div>
                     ) : null}
                     <div className="cellOcc">
                       {occupants.map((i) => (
-                        <PlayerChip key={i} idx={i} active={i === turn} />
+                        <PlayerChip key={i} idx={i} active={i === turn} tiny />
                       ))}
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        </section>
 
-        <section className="belowBoard">
-          <Collapsible title="How to play" defaultOpen={false}>
-            <ol className="steps">
-              <li>Pick language points and levels.</li>
-              <li>Roll the dice 🎲 to draw a challenge.</li>
-              <li>Mark Success/Fail.</li>
-            </ol>
-          </Collapsible>
-
-          <Collapsible
-            title="Recent draws"
-            defaultOpen={false}
-            right={<span className="muted">{history.length ? `${history.length} in session` : 'None yet'}</span>}
-          >
-            <div className="recent">
-              {history.slice(0, 10).map((t) => (
-                <button
-                  key={t.id}
-                  className="recentItem"
-                  onClick={() => {
-                    setShowAnswer(false);
-                    setHistory((h) => [t, ...h.filter((x) => x.id !== t.id)]);
+            <div className="burstLayer" aria-hidden>
+              {bursts.map((b) => (
+                <span
+                  key={b.id}
+                  className="burst"
+                  style={{
+                    left: `${b.x}%`,
+                    top: `${b.y}%`,
+                    '--dx': `${b.dx}px`,
+                    '--dy': `${b.dy}px`,
+                    '--rot': `${b.rot}deg`,
+                    '--life': `${b.life}ms`,
                   }}
                 >
-                  <div className="recentTop">
-                    <span className="recentType">{typeLabel(t.type)}</span>
-                    <span className="recentPack">{t.focus}</span>
-                  </div>
-                  <div className="recentPrompt">{t.prompt}</div>
+                  {b.emoji}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="legend cardy">
+            <span>🪜 up</span>
+            <span>🐍 down</span>
+            <span>⭐ +2</span>
+            <span>⚠️ -2</span>
+            <span>🧊 skip</span>
+            <span>🍀 +1</span>
+          </div>
+
+          <details className="history cardy">
+            <summary>🧾 Last draws ({history.length})</summary>
+            <div className="historyList">
+              {history.slice(0, 12).map((t) => (
+                <button
+                  key={`${t.id}-${t.prompt}`}
+                  className="historyItem"
+                  onClick={() => {
+                    setShowAnswer(false);
+                    setHistory((h) => [t, ...h.filter((x) => x !== t)]);
+                  }}
+                >
+                  <span>{TYPE_ICON[t.type] || '🎯'}</span>
+                  <span>{t.prompt}</span>
                 </button>
               ))}
-              {!history.length ? <div className="muted">No draws yet.</div> : null}
             </div>
-          </Collapsible>
+          </details>
         </section>
-
-        <footer className="footer">
-          <div>Built for <strong>ESL practice</strong>. Edit the sheet to add more tasks.</div>
-          <div className="footerRight">
-            <a href="https://github.com/audiophrases/snakesandladders" target="_blank" rel="noreferrer">GitHub</a>
-          </div>
-        </footer>
       </main>
     </div>
   );
