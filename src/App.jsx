@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL } from './config';
 import { fetchTasks, listGamePacks, weightedPick } from './tasks';
@@ -234,69 +234,151 @@ function Dice({ value, rolling }) {
   );
 }
 
-function JumpOverlay({ boardCells, boardSize, jumps }) {
-  const cols = 10;
-  const rows = boardRows(boardSize, cols);
-  const map = useMemo(() => buildNumberToGrid(boardCells, cols), [boardCells]);
+function JumpOverlay({ boardRef, jumps }) {
+  const [layout, setLayout] = useState({ width: 0, height: 0, points: {} });
 
-  const toPct = (cell) => {
-    const p = map.get(cell);
-    if (!p) return null;
-    const x = ((p.col + 0.5) / cols) * 100;
-    const y = ((p.row + 0.5) / rows) * 100;
-    return { x, y };
-  };
+  useLayoutEffect(() => {
+    const boardEl = boardRef.current;
+    if (!boardEl) return undefined;
+
+    let raf = 0;
+
+    const measure = () => {
+      const rect = boardEl.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+
+      const uniqueCells = new Set();
+      Object.entries(jumps).forEach(([s, e]) => {
+        uniqueCells.add(Number(s));
+        uniqueCells.add(Number(e));
+      });
+
+      const points = {};
+      uniqueCells.forEach((cell) => {
+        const el = boardEl.querySelector(`[data-cell-number="${cell}"]`);
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        points[cell] = {
+          x: r.left - rect.left + r.width / 2,
+          y: r.top - rect.top + r.height / 2,
+        };
+      });
+
+      setLayout({ width: rect.width, height: rect.height, points });
+    };
+
+    const requestMeasure = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    };
+
+    requestMeasure();
+
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(requestMeasure) : null;
+    if (ro) ro.observe(boardEl);
+
+    window.addEventListener('resize', requestMeasure);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', requestMeasure);
+    };
+  }, [boardRef, jumps]);
+
+  const toPoint = (cell) => layout.points[cell] || null;
+
+  if (!layout.width || !layout.height) return null;
 
   return (
-    <svg className="jumpOverlay" viewBox={`0 0 100 100`} preserveAspectRatio="none" aria-hidden>
+    <svg className="jumpOverlay" viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" aria-hidden>
       {Object.entries(jumps).map(([sStr, e]) => {
         const s = Number(sStr);
-        const a = toPct(s);
-        const b = toPct(e);
+        const a = toPoint(s);
+        const b = toPoint(e);
         if (!a || !b) return null;
 
         const ladder = e > s;
-        const stroke = ladder ? '#7dd3fc' : '#fb7185';
-        const width = ladder ? 0.65 : 0.75;
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const nx = -uy;
+        const ny = ux;
 
         if (ladder) {
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          const len = Math.hypot(dx, dy) || 1;
-          const nx = (-dy / len) * 0.7;
-          const ny = (dx / len) * 0.7;
+          const railOffset = clamp(len * 0.06, 5, 11);
+          const railW = clamp(len * 0.035, 2.6, 4.4);
+          const rungW = clamp(len * 0.02, 1.6, 2.8);
 
-          const x1 = a.x + nx;
-          const y1 = a.y + ny;
-          const x2 = b.x + nx;
-          const y2 = b.y + ny;
-          const x3 = a.x - nx;
-          const y3 = a.y - ny;
-          const x4 = b.x - nx;
-          const y4 = b.y - ny;
+          const x1 = a.x + nx * railOffset;
+          const y1 = a.y + ny * railOffset;
+          const x2 = b.x + nx * railOffset;
+          const y2 = b.y + ny * railOffset;
+          const x3 = a.x - nx * railOffset;
+          const y3 = a.y - ny * railOffset;
+          const x4 = b.x - nx * railOffset;
+          const y4 = b.y - ny * railOffset;
 
+          const rungCount = clamp(Math.round(len / 32), 3, 8);
           const rungs = [];
-          for (let t = 0.18; t <= 0.82; t += 0.18) {
+          for (let i = 1; i <= rungCount; i++) {
+            const t = i / (rungCount + 1);
             const rx1 = x1 + (x2 - x1) * t;
             const ry1 = y1 + (y2 - y1) * t;
             const rx2 = x3 + (x4 - x3) * t;
             const ry2 = y3 + (y4 - y3) * t;
-            rungs.push(<line key={`${s}-${e}-r-${t}`} x1={rx1} y1={ry1} x2={rx2} y2={ry2} stroke={stroke} strokeWidth="0.35" opacity="0.6" />);
+            rungs.push(
+              <line
+                key={`${s}-${e}-r-${i}`}
+                x1={rx1}
+                y1={ry1}
+                x2={rx2}
+                y2={ry2}
+                stroke="#ecfeff"
+                strokeWidth={rungW}
+                opacity="0.95"
+                strokeLinecap="round"
+              />,
+            );
           }
 
           return (
             <g key={`${s}-${e}`} className="ladderPath">
-              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={width} opacity="0.65" strokeLinecap="round" />
-              <line x1={x3} y1={y3} x2={x4} y2={y4} stroke={stroke} strokeWidth={width} opacity="0.65" strokeLinecap="round" />
+              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#0f172a" strokeWidth={railW + 1.8} opacity="0.35" strokeLinecap="round" />
+              <line x1={x3} y1={y3} x2={x4} y2={y4} stroke="#0f172a" strokeWidth={railW + 1.8} opacity="0.35" strokeLinecap="round" />
+              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#7dd3fc" strokeWidth={railW} opacity="0.95" strokeLinecap="round" />
+              <line x1={x3} y1={y3} x2={x4} y2={y4} stroke="#7dd3fc" strokeWidth={railW} opacity="0.95" strokeLinecap="round" />
               {rungs}
             </g>
           );
         }
 
-        const cx = (a.x + b.x) / 2;
-        const cy = (a.y + b.y) / 2 - 4;
-        const path = `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`;
-        return <path key={`${s}-${e}`} d={path} fill="none" stroke={stroke} strokeWidth={width} opacity="0.55" strokeLinecap="round" />;
+        const amp = clamp(len * 0.12, 8, 24);
+        const midX = a.x + dx * 0.5;
+        const midY = a.y + dy * 0.5;
+        const q1x = a.x + dx * 0.25 + nx * amp;
+        const q1y = a.y + dy * 0.25 + ny * amp;
+        const q2x = a.x + dx * 0.75 - nx * amp;
+        const q2y = a.y + dy * 0.75 - ny * amp;
+        const snakePath = `M ${a.x} ${a.y} Q ${q1x} ${q1y} ${midX} ${midY} Q ${q2x} ${q2y} ${b.x} ${b.y}`;
+
+        const bodyW = clamp(len * 0.045, 4.8, 9.5);
+        const headR = bodyW * 0.75;
+        const eyeOffset = bodyW * 0.28;
+        const eyeForward = bodyW * 0.2;
+
+        return (
+          <g key={`${s}-${e}`} className="snakePath">
+            <path d={snakePath} fill="none" stroke="#0f172a" strokeWidth={bodyW + 2.6} opacity="0.38" strokeLinecap="round" />
+            <path d={snakePath} fill="none" stroke="#fb7185" strokeWidth={bodyW} opacity="0.95" strokeLinecap="round" />
+            <circle cx={b.x} cy={b.y} r={headR} fill="#f43f5e" />
+            <circle cx={b.x + nx * eyeOffset + ux * eyeForward} cy={b.y + ny * eyeOffset + uy * eyeForward} r={Math.max(1.2, bodyW * 0.13)} fill="#fff" />
+            <circle cx={b.x - nx * eyeOffset + ux * eyeForward} cy={b.y - ny * eyeOffset + uy * eyeForward} r={Math.max(1.2, bodyW * 0.13)} fill="#fff" />
+          </g>
+        );
       })}
     </svg>
   );
@@ -330,6 +412,7 @@ export default function App() {
   const [bursts, setBursts] = useState([]); // {id, emoji, x, y}
   const [soundOn, setSoundOn] = useState(true);
   const audioCtxRef = useRef(null);
+  const boardGridRef = useRef(null);
 
   const [hydrated, setHydrated] = useState(false);
 
@@ -972,14 +1055,14 @@ export default function App() {
 
         <section className="boardPane">
           <div className="boardShell cardy">
-            <JumpOverlay boardCells={boardCells} boardSize={boardSize} jumps={jumps} />
-
             <div
               className="boardGrid"
+              ref={boardGridRef}
               role="grid"
               aria-label="Snakes and Ladders board"
               style={{ gridTemplateColumns: 'repeat(10, 1fr)', gridTemplateRows: `repeat(${rows}, 1fr)` }}
             >
+              <JumpOverlay boardRef={boardGridRef} jumps={jumps} />
               {boardCells.map((n, idx) => {
                 if (n == null) return <div key={`blank-${idx}`} className="cell blank" />;
 
@@ -994,10 +1077,14 @@ export default function App() {
                 const special = specials[n] || '';
 
                 return (
-                  <div key={n} className={`cell ${jumpKind} ${special} ${isTurnCell ? 'turnCell' : ''}`} role="gridcell">
+                  <div
+                    key={n}
+                    className={`cell ${jumpKind} ${special} ${isTurnCell ? 'turnCell' : ''}`}
+                    role="gridcell"
+                    data-cell-number={n}
+                  >
                     <div className="cellNum">{n}</div>
                     {n === boardSize ? <div className="cellWin">🏁</div> : null}
-                    {jumpTo ? <div className="cellIcon">{jumpTo > n ? '🪜' : '🐍'}</div> : null}
                     {!jumpTo && special ? (
                       <div className="cellIcon">
                         {special === 'boost' ? '⭐' : special === 'trap' ? '⚠️' : special === 'freeze' ? '🧊' : '🍀'}
