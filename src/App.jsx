@@ -3,8 +3,8 @@ import './App.css';
 import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL } from './config';
 import { fetchTasks, listGamePacks, weightedPick } from './tasks';
 
-const STORAGE_KEY = 'snl_party_v3';
-const DEFAULT_BOARD_SIZE = 100;
+const STORAGE_KEY = 'snl_party_v4';
+const DEFAULT_BOARD_SIZE = 60;
 
 // start -> end
 const BASE_JUMPS_100 = {
@@ -243,10 +243,14 @@ function JumpOverlay({ boardRef, jumps }) {
     if (!boardEl) return undefined;
 
     let raf = 0;
+    let retryTimer = 0;
 
-    const measure = () => {
+    const measure = (retry = 0) => {
       const rect = boardEl.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
+      if (!rect.width || !rect.height) {
+        if (retry < 6) raf = requestAnimationFrame(() => measure(retry + 1));
+        return;
+      }
 
       const uniqueCells = new Set();
       Object.entries(jumps).forEach(([s, e]) => {
@@ -266,23 +270,37 @@ function JumpOverlay({ boardRef, jumps }) {
       });
 
       setLayout({ width: rect.width, height: rect.height, points });
+
+      // Initial mount can race with DOM/layout in some browsers; retry a few frames
+      // if not enough endpoints were captured yet.
+      if (Object.keys(points).length < 4 && retry < 6) {
+        raf = requestAnimationFrame(() => measure(retry + 1));
+      }
     };
 
     const requestMeasure = () => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(measure);
+      raf = requestAnimationFrame(() => measure(0));
     };
 
     requestMeasure();
+    retryTimer = window.setTimeout(requestMeasure, 120);
 
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(requestMeasure) : null;
     if (ro) ro.observe(boardEl);
+
+    const mo = typeof MutationObserver !== 'undefined'
+      ? new MutationObserver(requestMeasure)
+      : null;
+    if (mo) mo.observe(boardEl, { childList: true, subtree: true });
 
     window.addEventListener('resize', requestMeasure);
 
     return () => {
       cancelAnimationFrame(raf);
+      window.clearTimeout(retryTimer);
       if (ro) ro.disconnect();
+      if (mo) mo.disconnect();
       window.removeEventListener('resize', requestMeasure);
     };
   }, [boardRef, jumps]);
