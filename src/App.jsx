@@ -53,12 +53,13 @@ function pickEvenly(entries, count) {
 }
 
 const CATALAN_EMOJI = '🥘';
+const ENGLISH_EMOJI = '🍔';
 
 const TYPE_ICON = {
   speaking: '🗣️',
   error_correction: '🛠️',
-  translate_ca_en: `${CATALAN_EMOJI}➡️🇺🇸`,
-  translate_en_ca: `🇺🇸➡️${CATALAN_EMOJI}`,
+  translate_ca_en: `${CATALAN_EMOJI}➡️${ENGLISH_EMOJI}`,
+  translate_en_ca: `${ENGLISH_EMOJI}➡️${CATALAN_EMOJI}`,
 };
 
 function clamp(n, a, b) {
