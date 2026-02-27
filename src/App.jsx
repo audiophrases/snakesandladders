@@ -942,7 +942,7 @@ export default function App() {
             <div className="pill">🎯 {filtered.length}</div>
           </div>
 
-          <details className="picker cardy" open>
+          <details className="picker cardy">
             <summary>🎒 Packs</summary>
             <div className="pickerGrid">
               {packs.map((p) => {
