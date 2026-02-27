@@ -87,11 +87,18 @@ export async function fetchTasks(csvUrl) {
   const res = await fetch(csvUrl, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to load tasks CSV (${res.status})`);
 
-  // Force UTF-8 decoding (Google "published CSV" sometimes comes without a charset;
-  // some browsers will mis-decode and you get cafÃ© instead of café).
   const buf = await res.arrayBuffer();
-  let text = new TextDecoder('utf-8').decode(buf);
-  // Strip UTF-8 BOM if present
+  let text = '';
+
+  // Prefer strict UTF-8. If the source is actually legacy encoded (common for some
+  // published Google CSV endpoints), fall back to Windows-1252 to preserve accents.
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    text = new TextDecoder('windows-1252').decode(buf);
+  }
+
+  // Strip BOM if present
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
 
   const rows = parseCSV(text);
