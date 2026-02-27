@@ -235,7 +235,7 @@ function Dice({ value, rolling }) {
   );
 }
 
-function JumpOverlay({ boardRef, jumps }) {
+function JumpOverlay({ boardRef, jumps, cellMap, rows, cols = 10 }) {
   const [layout, setLayout] = useState({ width: 0, height: 0, points: {} });
 
   useLayoutEffect(() => {
@@ -259,13 +259,28 @@ function JumpOverlay({ boardRef, jumps }) {
       });
 
       const points = {};
+      const style = window.getComputedStyle(boardEl);
+      const colGap = parseFloat(style.columnGap || style.gap || '0') || 0;
+      const rowGap = parseFloat(style.rowGap || style.gap || '0') || 0;
+      const cellW = (rect.width - (cols - 1) * colGap) / cols;
+      const cellH = (rect.height - (rows - 1) * rowGap) / rows;
+
       uniqueCells.forEach((cell) => {
         const el = boardEl.querySelector(`[data-cell-number="${cell}"]`);
-        if (!el) return;
-        const r = el.getBoundingClientRect();
+        if (el) {
+          const r = el.getBoundingClientRect();
+          points[cell] = {
+            x: r.left - rect.left + r.width / 2,
+            y: r.top - rect.top + r.height / 2,
+          };
+          return;
+        }
+
+        const gc = cellMap?.get?.(cell);
+        if (!gc) return;
         points[cell] = {
-          x: r.left - rect.left + r.width / 2,
-          y: r.top - rect.top + r.height / 2,
+          x: gc.col * (cellW + colGap) + cellW / 2,
+          y: gc.row * (cellH + rowGap) + cellH / 2,
         };
       });
 
@@ -303,7 +318,7 @@ function JumpOverlay({ boardRef, jumps }) {
       if (mo) mo.disconnect();
       window.removeEventListener('resize', requestMeasure);
     };
-  }, [boardRef, jumps]);
+  }, [boardRef, jumps, cellMap, rows, cols]);
 
   const toPoint = (cell) => layout.points[cell] || null;
 
@@ -476,6 +491,7 @@ export default function App() {
 
   const boardCells = useMemo(() => buildBoardCells(boardSize, 10), [boardSize]);
   const rows = useMemo(() => boardRows(boardSize, 10), [boardSize]);
+  const numberToGrid = useMemo(() => buildNumberToGrid(boardCells, 10), [boardCells]);
   const jumps = useMemo(() => buildJumps(boardSize), [boardSize]);
   const specials = useMemo(() => buildSpecialCells(boardSize, jumps), [boardSize, jumps]);
 
@@ -1081,7 +1097,6 @@ export default function App() {
               aria-label="Snakes and Ladders board"
               style={{ gridTemplateColumns: 'repeat(10, 1fr)', gridTemplateRows: `repeat(${rows}, 1fr)` }}
             >
-              <JumpOverlay boardRef={boardGridRef} jumps={jumps} />
               {boardCells.map((n, idx) => {
                 if (n == null) return <div key={`blank-${idx}`} className="cell blank" />;
 
@@ -1117,6 +1132,7 @@ export default function App() {
                   </div>
                 );
               })}
+              <JumpOverlay boardRef={boardGridRef} jumps={jumps} cellMap={numberToGrid} rows={rows} cols={10} />
             </div>
 
             <div className="burstLayer" aria-hidden>
