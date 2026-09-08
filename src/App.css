@@ -6,6 +6,18 @@
   --stroke:rgba(255,255,255,.2);
   --text:#f8f5ff;
   --muted:rgba(248,245,255,.78);
+
+  /* Snake green / ladder wood, matched to the 🐍🪜🎲 brand mark. */
+  --snake:#22c55e;
+  --snake-lit:#86efac;
+  --snake-dark:#15803d;
+  --snake-tint:rgba(34,197,94,.55);
+  --snake-faint:rgba(34,197,94,.3);
+  --ladder:#d9873f;
+  --ladder-lit:#f6c07a;
+  --ladder-dark:#8a4f22;
+  --ladder-tint:rgba(246,192,122,.55);
+  --ladder-faint:rgba(246,192,122,.3);
 }
 
 *{box-sizing:border-box}
@@ -272,8 +284,63 @@
 .cellIcon{position:absolute;right:7px;bottom:6px;font-size:17px}
 .cellOcc{position:absolute;left:6px;bottom:6px;display:flex;gap:4px;flex-wrap:wrap}
 
-.cell.ladder{border-color:rgba(125,211,252,.55)}
-.cell.snake{border-color:rgba(251,113,133,.55)}
+/* Endpoint cells sit above the over-layer so a snake head or tongue can never
+   cover the badge that names the square it jumps to. The head still overhangs
+   its neighbours normally. */
+.cell.ladderStart,
+.cell.ladderEnd,
+.cell.snakeStart,
+.cell.snakeEnd{z-index:7}
+
+.cell.ladderStart{border-color:var(--ladder-tint)}
+.cell.ladderEnd{border-color:var(--ladder-faint);border-style:dashed}
+.cell.snakeStart{border-color:var(--snake-tint)}
+.cell.snakeEnd{border-color:var(--snake-faint);border-style:dashed}
+/* A square can take both a ladder and a snake (28 and 45 both land on 41 on a
+   70 board), so give the mixed case its own edge instead of an arbitrary one. */
+.cell.ladderEnd.snakeEnd{border-color:rgba(248,245,255,.42);border-style:dashed}
+.cell.jumpHot{box-shadow:0 0 0 2px rgba(255,255,255,.5), 0 10px 22px rgba(0,0,0,.22)}
+
+/* Jump endpoint badges. buildSpecialCells skips jump cells, so the
+   bottom-right slot is always free here. A square can collect more than one
+   arrival, so the badges stack. */
+.cellJumps{
+  position:absolute;
+  right:4px;
+  bottom:4px;
+  z-index:3;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:2px;
+}
+.cellJumps.multi .cellJump{font-size:8px;padding:0 3px}
+.cellJumps.multi .cellJumpGlyph{font-size:9px}
+
+.cellJump{
+  display:flex;
+  align-items:center;
+  gap:2px;
+  padding:1px 4px 1px 3px;
+  border-radius:999px;
+  border:1px solid transparent;
+  background:rgba(6,10,20,.93);
+  font-size:9px;
+  font-weight:800;
+  line-height:1.5;
+  letter-spacing:-.2px;
+  white-space:nowrap;
+}
+.cellJumpGlyph{font-size:11px;line-height:1}
+.cellJump.ladder{border-color:var(--ladder-tint);color:var(--ladder-lit)}
+.cellJump.snake{border-color:var(--snake-tint);color:var(--snake-lit)}
+.cellJump.end{opacity:.74;border-style:dashed}
+
+@media (max-width:640px){
+  .cellJumps{right:2px;bottom:2px;gap:1px}
+  .cellJump{padding:0 3px;font-size:8px}
+  .cellJumpGlyph{display:none}
+}
 .cell.boost{box-shadow:inset 0 0 0 1px rgba(253,224,71,.45)}
 .cell.trap{box-shadow:inset 0 0 0 1px rgba(248,113,113,.45)}
 .cell.freeze{box-shadow:inset 0 0 0 1px rgba(103,232,249,.45)}
@@ -351,13 +418,37 @@
 .jumpOverlay{
   position:absolute;
   inset:0;
-  z-index:6;
   pointer-events:none;
 }
 
+/* Bodies and rails run beneath the cells — cell backgrounds are translucent, so
+   they stay visible without covering numbers or player chips. Heads, tongues and
+   ladder feet sit above so they read crisply. */
+.jumpUnder{z-index:1}
+.jumpOver{z-index:6}
+
+.jumpG{transition:opacity .18s ease}
+.jumpG.dim{opacity:.15}
+.jumpG.hot{filter:drop-shadow(0 0 6px rgba(255,255,255,.5))}
+
 .snakePath,
 .ladderPath{
-  filter:drop-shadow(0 2px 4px rgba(0,0,0,.24));
+  filter:drop-shadow(0 2px 4px rgba(0,0,0,.28));
+}
+
+.jumpHalo{fill:none;stroke:#0b1220;opacity:.45}
+
+.ladderRung{stroke:var(--ladder-lit)}
+.ladderFoot{fill:var(--ladder-dark);stroke:rgba(0,0,0,.4);stroke-width:1}
+.ladderCap{fill:var(--ladder-lit)}
+
+.snakeScales{stroke:var(--snake-lit);opacity:.34}
+.snakeEye{fill:#fff}
+.snakePupil{fill:#0b1220}
+.snakeTongue{stroke:#f43f5e}
+
+@media (prefers-reduced-motion:reduce){
+  .jumpG{transition:none}
 }
 
 .burstLayer{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}

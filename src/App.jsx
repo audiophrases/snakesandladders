@@ -235,20 +235,202 @@ function Dice({ value, rolling }) {
   );
 }
 
-function JumpOverlay({ boardRef, jumps, cellMap, rows, cols = 10 }) {
-  const [layout, setLayout] = useState({ width: 0, height: 0, points: {} });
+function jumpSeed(s, e) {
+  return mulberry32((((s + 1) * 73856093) ^ ((e + 1) * 19349663)) >>> 0)();
+}
+
+function cubicAt(p0, c1, c2, p3, t) {
+  const mt = 1 - t;
+  const w0 = mt * mt * mt;
+  const w1 = 3 * mt * mt * t;
+  const w2 = 3 * mt * t * t;
+  const w3 = t * t * t;
+  return {
+    x: w0 * p0.x + w1 * c1.x + w2 * c2.x + w3 * p3.x,
+    y: w0 * p0.y + w1 * c1.y + w2 * c2.y + w3 * p3.y,
+  };
+}
+
+function cubicTangent(p0, c1, c2, p3, t) {
+  const mt = 1 - t;
+  const w0 = 3 * mt * mt;
+  const w1 = 6 * mt * t;
+  const w2 = 3 * t * t;
+  return {
+    x: w0 * (c1.x - p0.x) + w1 * (c2.x - c1.x) + w2 * (p3.x - c2.x),
+    y: w0 * (c1.y - p0.y) + w1 * (c2.y - c1.y) + w2 * (p3.y - c2.y),
+  };
+}
+
+// Width stays near full through the front half, then tapers to a point at the tail.
+function taperProfile(t) {
+  if (t < 0.5) return 1 - t * 0.22;
+  const k = (t - 0.5) / 0.5;
+  return 0.75 * (1 - Math.pow(k, 1.7)) + 0.14;
+}
+
+// Snake bodies need a real taper, and SVG strokes cannot taper. Sample the
+// centerline and emit a closed outline instead.
+function taperedOutline(p0, c1, c2, p3, width, steps = 40) {
+  const left = [];
+  const right = [];
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const p = cubicAt(p0, c1, c2, p3, t);
+    const d = cubicTangent(p0, c1, c2, p3, t);
+    const l = Math.hypot(d.x, d.y) || 1;
+    const nx = -d.y / l;
+    const ny = d.x / l;
+    const hw = (width * taperProfile(t)) / 2;
+    left.push(`${(p.x + nx * hw).toFixed(2)} ${(p.y + ny * hw).toFixed(2)}`);
+    right.push(`${(p.x - nx * hw).toFixed(2)} ${(p.y - ny * hw).toFixed(2)}`);
+  }
+
+  return `M ${left.join(' L ')} L ${right.reverse().join(' L ')} Z`;
+}
+
+// Geometry is shared by the under-layer (bodies, rails) and the over-layer
+// (heads, feet), so both draw from one pass.
+function buildJumpGeometry(jumps, points, cellMin) {
+  const out = [];
+
+  Object.entries(jumps).forEach(([sStr, e]) => {
+    const s = Number(sStr);
+    const A = points[s];
+    const B = points[e];
+    if (!A || !B) return;
+
+    const rawDx = B.x - A.x;
+    const rawDy = B.y - A.y;
+    const rawLen = Math.hypot(rawDx, rawDy) || 1;
+    const ux = rawDx / rawLen;
+    const uy = rawDy / rawLen;
+
+    // Pull the endpoints off the cell centre so the art clears the cell number
+    // and the player chips.
+    const inset = Math.min(cellMin * 0.2, rawLen * 0.28);
+    const a = { x: A.x + ux * inset, y: A.y + uy * inset };
+    const b = { x: B.x - ux * inset, y: B.y - uy * inset };
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+
+    out.push({
+      s,
+      e,
+      a,
+      b,
+      len,
+      nx: -dy / len,
+      ny: dx / len,
+      ladder: e > s,
+    });
+  });
+
+  return out;
+}
+
+function ladderParts(g, cellMin) {
+  const { a, b, len, nx, ny } = g;
+  const railW = clamp(cellMin * 0.075, 2.4, 5);
+  // Slight convergence toward the top reads as perspective.
+  const baseOff = clamp(len * 0.075, cellMin * 0.16, cellMin * 0.34);
+  const topOff = baseOff * 0.82;
+
+  const rails = [
+    [a.x + nx * baseOff, a.y + ny * baseOff, b.x + nx * topOff, b.y + ny * topOff],
+    [a.x - nx * baseOff, a.y - ny * baseOff, b.x - nx * topOff, b.y - ny * topOff],
+  ];
+
+  const rungCount = clamp(Math.round(len / (cellMin * 0.62)), 3, 9);
+  const rungs = [];
+  for (let i = 1; i <= rungCount; i++) {
+    const t = i / (rungCount + 1);
+    const off = baseOff + (topOff - baseOff) * t;
+    const cx = a.x + (b.x - a.x) * t;
+    const cy = a.y + (b.y - a.y) * t;
+    rungs.push([cx + nx * off, cy + ny * off, cx - nx * off, cy - ny * off]);
+  }
+
+  return { railW, rails, rungs };
+}
+
+function snakeParts(g, cellMin) {
+  const { s, e, a, b, len, nx, ny } = g;
+  const r = jumpSeed(s, e);
+  const sign = r < 0.5 ? -1 : 1;
+  // Seeded so jumps sharing a corridor bend apart, and so a given board always
+  // renders identically.
+  const amp = sign * clamp(len * 0.13 + cellMin * r * 0.5, cellMin * 0.4, cellMin * 1.5);
+
+  const c1 = { x: a.x + (b.x - a.x) * 0.3 + nx * amp, y: a.y + (b.y - a.y) * 0.3 + ny * amp };
+  const c2 = { x: a.x + (b.x - a.x) * 0.7 - nx * amp, y: a.y + (b.y - a.y) * 0.7 - ny * amp };
+
+  const bodyW = clamp(cellMin * 0.19, 5, 13);
+  const centerline = `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} C ${c1.x.toFixed(2)} ${c1.y.toFixed(2)}, ${c2.x.toFixed(2)} ${c2.y.toFixed(2)}, ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
+  const outline = taperedOutline(a, c1, c2, b, bodyW);
+
+  // The head belongs on the high square — that is the one that swallows you.
+  const t0 = cubicTangent(a, c1, c2, b, 0);
+  const tl = Math.hypot(t0.x, t0.y) || 1;
+  const fx = -t0.x / tl;
+  const fy = -t0.y / tl;
+  const hx = -fy;
+  const hy = fx;
+
+  const headLen = bodyW * 1.45;
+  const headW = bodyW * 1.15;
+  const tip = { x: a.x + fx * headLen, y: a.y + fy * headLen };
+  const shoulder = headLen * 0.86;
+
+  const head = [
+    `M ${(a.x + hx * (headW / 2)).toFixed(2)} ${(a.y + hy * (headW / 2)).toFixed(2)}`,
+    `Q ${(a.x + fx * shoulder + hx * headW * 0.52).toFixed(2)} ${(a.y + fy * shoulder + hy * headW * 0.52).toFixed(2)}`,
+    `${tip.x.toFixed(2)} ${tip.y.toFixed(2)}`,
+    `Q ${(a.x + fx * shoulder - hx * headW * 0.52).toFixed(2)} ${(a.y + fy * shoulder - hy * headW * 0.52).toFixed(2)}`,
+    `${(a.x - hx * (headW / 2)).toFixed(2)} ${(a.y - hy * (headW / 2)).toFixed(2)}`,
+    'Z',
+  ].join(' ');
+
+  const eyeR = Math.max(1.1, bodyW * 0.17);
+  const eyes = [1, -1].map((side) => ({
+    x: a.x + fx * headLen * 0.38 + hx * side * headW * 0.27,
+    y: a.y + fy * headLen * 0.38 + hy * side * headW * 0.27,
+  }));
+
+  const tongueLen = bodyW;
+  const forkAt = { x: tip.x + fx * tongueLen * 0.55, y: tip.y + fy * tongueLen * 0.55 };
+  const tongue = [
+    `M ${tip.x.toFixed(2)} ${tip.y.toFixed(2)} L ${forkAt.x.toFixed(2)} ${forkAt.y.toFixed(2)}`,
+    `M ${forkAt.x.toFixed(2)} ${forkAt.y.toFixed(2)} L ${(forkAt.x + fx * tongueLen * 0.45 + hx * tongueLen * 0.34).toFixed(2)} ${(forkAt.y + fy * tongueLen * 0.45 + hy * tongueLen * 0.34).toFixed(2)}`,
+    `M ${forkAt.x.toFixed(2)} ${forkAt.y.toFixed(2)} L ${(forkAt.x + fx * tongueLen * 0.45 - hx * tongueLen * 0.34).toFixed(2)} ${(forkAt.y + fy * tongueLen * 0.45 - hy * tongueLen * 0.34).toFixed(2)}`,
+  ].join(' ');
+
+  return { bodyW, centerline, outline, head, eyes, eyeR, tongue };
+}
+
+function useBoardLayout(boardRef, jumps, cellMap, rows, cols) {
+  const [layout, setLayout] = useState({ width: 0, height: 0, points: {}, cellMin: 0 });
+  // The overlays live inside the board, so their own renders trip the
+  // MutationObserver. Only commit when the measurement actually moved.
+  const lastSig = useRef('');
 
   useLayoutEffect(() => {
-    const boardEl = boardRef.current;
-    if (!boardEl) return undefined;
-
     let raf = 0;
     let retryTimer = 0;
+    let ro = null;
+    let mo = null;
+    let onResize = null;
+    let disposed = false;
 
-    const measure = (retry = 0) => {
+    const measure = (boardEl, retry = 0) => {
+      if (disposed) return;
+
       const rect = boardEl.getBoundingClientRect();
       if (!rect.width || !rect.height) {
-        if (retry < 6) raf = requestAnimationFrame(() => measure(retry + 1));
+        if (retry < 6) raf = requestAnimationFrame(() => measure(boardEl, retry + 1));
         return;
       }
 
@@ -284,133 +466,186 @@ function JumpOverlay({ boardRef, jumps, cellMap, rows, cols = 10 }) {
         };
       });
 
-      setLayout({ width: rect.width, height: rect.height, points });
+      const cellMin = Math.max(1, Math.min(cellW, cellH));
+      const sig = `${rect.width.toFixed(1)}|${rect.height.toFixed(1)}|${cellMin.toFixed(1)}|${Object.keys(points)
+        .sort((x, y) => Number(x) - Number(y))
+        .map((k) => `${k}:${points[k].x.toFixed(1)},${points[k].y.toFixed(1)}`)
+        .join(';')}`;
+
+      if (sig !== lastSig.current) {
+        lastSig.current = sig;
+        setLayout({ width: rect.width, height: rect.height, points, cellMin });
+      }
 
       // Initial mount can race with DOM/layout in some browsers; retry a few frames
       // if not enough endpoints were captured yet.
       if (Object.keys(points).length < 4 && retry < 6) {
-        raf = requestAnimationFrame(() => measure(retry + 1));
+        raf = requestAnimationFrame(() => measure(boardEl, retry + 1));
       }
     };
 
-    const requestMeasure = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => measure(0));
+    // React attaches a parent's ref after this child's layout effect runs, so the
+    // board element is not there yet on first mount. Wait for it instead of
+    // bailing out — the effect deps never change, so bailing meant never drawing.
+    const attach = (tries = 0) => {
+      if (disposed) return;
+
+      const boardEl = boardRef.current;
+      if (!boardEl) {
+        if (tries < 30) raf = requestAnimationFrame(() => attach(tries + 1));
+        return;
+      }
+
+      const requestMeasure = () => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => measure(boardEl, 0));
+      };
+
+      requestMeasure();
+      retryTimer = window.setTimeout(requestMeasure, 120);
+
+      ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(requestMeasure) : null;
+      if (ro) ro.observe(boardEl);
+
+      mo = typeof MutationObserver !== 'undefined' ? new MutationObserver(requestMeasure) : null;
+      if (mo) mo.observe(boardEl, { childList: true, subtree: true });
+
+      onResize = requestMeasure;
+      window.addEventListener('resize', onResize);
     };
 
-    requestMeasure();
-    retryTimer = window.setTimeout(requestMeasure, 120);
-
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(requestMeasure) : null;
-    if (ro) ro.observe(boardEl);
-
-    const mo = typeof MutationObserver !== 'undefined'
-      ? new MutationObserver(requestMeasure)
-      : null;
-    if (mo) mo.observe(boardEl, { childList: true, subtree: true });
-
-    window.addEventListener('resize', requestMeasure);
+    attach();
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(raf);
       window.clearTimeout(retryTimer);
       if (ro) ro.disconnect();
       if (mo) mo.disconnect();
-      window.removeEventListener('resize', requestMeasure);
+      if (onResize) window.removeEventListener('resize', onResize);
     };
   }, [boardRef, jumps, cellMap, rows, cols]);
 
-  const toPoint = (cell) => layout.points[cell] || null;
+  return layout;
+}
+
+// Long connectors sit under the cells (cell backgrounds are translucent, so they
+// stay readable) and heads/feet sit above, so nothing paints over a cell number.
+function JumpOverlay({ boardRef, jumps, cellMap, rows, cols = 10, activeJumps = null, layer = 'under' }) {
+  const layout = useBoardLayout(boardRef, jumps, cellMap, rows, cols);
+
+  const geometry = useMemo(
+    () => (layout.width ? buildJumpGeometry(jumps, layout.points, layout.cellMin) : []),
+    [jumps, layout],
+  );
 
   if (!layout.width || !layout.height) return null;
 
+  const under = layer === 'under';
+  const suffix = under ? 'u' : 'o';
+
   return (
-    <svg className="jumpOverlay" viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" aria-hidden>
-      {Object.entries(jumps).map(([sStr, e]) => {
-        const s = Number(sStr);
-        const a = toPoint(s);
-        const b = toPoint(e);
-        if (!a || !b) return null;
+    <svg
+      className={`jumpOverlay ${under ? 'jumpUnder' : 'jumpOver'}`}
+      viewBox={`0 0 ${layout.width} ${layout.height}`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id={`ladderWood-${suffix}`} x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stopColor="var(--ladder-dark)" />
+          <stop offset="55%" stopColor="var(--ladder)" />
+          <stop offset="100%" stopColor="var(--ladder-lit)" />
+        </linearGradient>
+        <linearGradient id={`snakeSkin-${suffix}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--snake-lit)" />
+          <stop offset="60%" stopColor="var(--snake)" />
+          <stop offset="100%" stopColor="var(--snake-dark)" />
+        </linearGradient>
+      </defs>
 
-        const ladder = e > s;
+      {geometry.map((g) => {
+        const isolating = !!(activeJumps && activeJumps.length);
+        const hot = isolating && activeJumps.includes(g.s);
+        const cls = `jumpG ${g.ladder ? 'ladderPath' : 'snakePath'}${
+          isolating && !hot ? ' dim' : ''
+        }${hot ? ' hot' : ''}`;
 
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const ux = dx / len;
-        const uy = dy / len;
-        const nx = -uy;
-        const ny = ux;
+        if (g.ladder) {
+          const { railW, rails, rungs } = ladderParts(g, layout.cellMin);
 
-        if (ladder) {
-          const railOffset = clamp(len * 0.06, 5, 11);
-          const railW = clamp(len * 0.035, 2.6, 4.4);
-          const rungW = clamp(len * 0.02, 1.6, 2.8);
-
-          const x1 = a.x + nx * railOffset;
-          const y1 = a.y + ny * railOffset;
-          const x2 = b.x + nx * railOffset;
-          const y2 = b.y + ny * railOffset;
-          const x3 = a.x - nx * railOffset;
-          const y3 = a.y - ny * railOffset;
-          const x4 = b.x - nx * railOffset;
-          const y4 = b.y - ny * railOffset;
-
-          const rungCount = clamp(Math.round(len / 32), 3, 8);
-          const rungs = [];
-          for (let i = 1; i <= rungCount; i++) {
-            const t = i / (rungCount + 1);
-            const rx1 = x1 + (x2 - x1) * t;
-            const ry1 = y1 + (y2 - y1) * t;
-            const rx2 = x3 + (x4 - x3) * t;
-            const ry2 = y3 + (y4 - y3) * t;
-            rungs.push(
-              <line
-                key={`${s}-${e}-r-${i}`}
-                x1={rx1}
-                y1={ry1}
-                x2={rx2}
-                y2={ry2}
-                stroke="#ecfeff"
-                strokeWidth={rungW}
-                opacity="0.95"
-                strokeLinecap="round"
-              />,
-            );
+          if (!under) {
+            // Ladders draw entirely on the under-layer: feet land in the same
+            // corner as the endpoint badge, and above the cells they covered it.
+            return null;
           }
 
           return (
-            <g key={`${s}-${e}`} className="ladderPath">
-              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#0f172a" strokeWidth={railW + 1.8} opacity="0.35" strokeLinecap="round" />
-              <line x1={x3} y1={y3} x2={x4} y2={y4} stroke="#0f172a" strokeWidth={railW + 1.8} opacity="0.35" strokeLinecap="round" />
-              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#7dd3fc" strokeWidth={railW} opacity="0.95" strokeLinecap="round" />
-              <line x1={x3} y1={y3} x2={x4} y2={y4} stroke="#7dd3fc" strokeWidth={railW} opacity="0.95" strokeLinecap="round" />
-              {rungs}
+            <g key={`${g.s}-${g.e}`} className={cls}>
+              {rails.map(([x1, y1, x2, y2], i) => (
+                <line key={`rail-halo-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="jumpHalo" strokeWidth={railW + 2.2} strokeLinecap="round" />
+              ))}
+              {rungs.map(([x1, y1, x2, y2], i) => (
+                <line key={`rung-halo-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="jumpHalo" strokeWidth={railW * 0.78 + 1.6} strokeLinecap="round" />
+              ))}
+              {rungs.map(([x1, y1, x2, y2], i) => (
+                <line key={`rung-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} className="ladderRung" strokeWidth={railW * 0.78} strokeLinecap="round" />
+              ))}
+              {rails.map(([x1, y1, x2, y2], i) => (
+                <line
+                  key={`rail-${i}`}
+                  x1={x1}
+                  y1={y1}
+                  x2={x2}
+                  y2={y2}
+                  stroke={`url(#ladderWood-${suffix})`}
+                  strokeWidth={railW}
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              ))}
+              {rails.map(([x1, y1, x2, y2], i) => (
+                <g key={`end-${i}`}>
+                  <circle cx={x1} cy={y1} r={railW * 0.85} className="ladderFoot" />
+                  <circle cx={x2} cy={y2} r={railW * 0.68} className="ladderCap" />
+                </g>
+              ))}
+              <title>{`Ladder: ${g.s} up to ${g.e}`}</title>
             </g>
           );
         }
 
-        const amp = clamp(len * 0.12, 8, 24);
-        const midX = a.x + dx * 0.5;
-        const midY = a.y + dy * 0.5;
-        const q1x = a.x + dx * 0.25 + nx * amp;
-        const q1y = a.y + dy * 0.25 + ny * amp;
-        const q2x = a.x + dx * 0.75 - nx * amp;
-        const q2y = a.y + dy * 0.75 - ny * amp;
-        const snakePath = `M ${a.x} ${a.y} Q ${q1x} ${q1y} ${midX} ${midY} Q ${q2x} ${q2y} ${b.x} ${b.y}`;
+        const sp = snakeParts(g, layout.cellMin);
 
-        const bodyW = clamp(len * 0.045, 4.8, 9.5);
-        const headR = bodyW * 0.75;
-        const eyeOffset = bodyW * 0.28;
-        const eyeForward = bodyW * 0.2;
+        if (!under) {
+          return (
+            <g key={`${g.s}-${g.e}`} className={cls}>
+              <path d={sp.tongue} className="snakeTongue" strokeWidth={Math.max(1, sp.bodyW * 0.16)} strokeLinecap="round" fill="none" />
+              <path d={sp.head} className="jumpHalo" strokeWidth={2.4} strokeLinejoin="round" />
+              <path d={sp.head} fill={`url(#snakeSkin-${suffix})`} strokeLinejoin="round" />
+              {sp.eyes.map((p, i) => (
+                <g key={i}>
+                  <circle cx={p.x} cy={p.y} r={sp.eyeR} className="snakeEye" />
+                  <circle cx={p.x} cy={p.y} r={sp.eyeR * 0.45} className="snakePupil" />
+                </g>
+              ))}
+            </g>
+          );
+        }
 
         return (
-          <g key={`${s}-${e}`} className="snakePath">
-            <path d={snakePath} fill="none" stroke="#0f172a" strokeWidth={bodyW + 2.6} opacity="0.38" strokeLinecap="round" />
-            <path d={snakePath} fill="none" stroke="#fb7185" strokeWidth={bodyW} opacity="0.95" strokeLinecap="round" />
-            <circle cx={b.x} cy={b.y} r={headR} fill="#f43f5e" />
-            <circle cx={b.x + nx * eyeOffset + ux * eyeForward} cy={b.y + ny * eyeOffset + uy * eyeForward} r={Math.max(1.2, bodyW * 0.13)} fill="#fff" />
-            <circle cx={b.x - nx * eyeOffset + ux * eyeForward} cy={b.y - ny * eyeOffset + uy * eyeForward} r={Math.max(1.2, bodyW * 0.13)} fill="#fff" />
+          <g key={`${g.s}-${g.e}`} className={cls}>
+            <path d={sp.outline} className="jumpHalo" strokeWidth={2.6} strokeLinejoin="round" />
+            <path d={sp.outline} fill={`url(#snakeSkin-${suffix})`} strokeLinejoin="round" />
+            <path
+              d={sp.centerline}
+              className="snakeScales"
+              strokeWidth={sp.bodyW * 0.5}
+              strokeDasharray={`${(sp.bodyW * 0.42).toFixed(2)} ${(sp.bodyW * 0.78).toFixed(2)}`}
+              strokeLinecap="round"
+              fill="none"
+            />
+            <title>{`Snake: ${g.s} down to ${g.e}`}</title>
           </g>
         );
       })}
@@ -494,6 +729,36 @@ export default function App() {
   const numberToGrid = useMemo(() => buildNumberToGrid(boardCells, 10), [boardCells]);
   const jumps = useMemo(() => buildJumps(boardSize), [boardSize]);
   const specials = useMemo(() => buildSpecialCells(boardSize, jumps), [boardSize, jumps]);
+
+  // Both ends of a jump need a marker: without one, the landing square is
+  // unlabelled and players have to trace the curve to find it. A square can
+  // collect more than one arrival (on a 70 board, a ladder from 28 and a snake
+  // from 45 both land on 41), so every role is kept, not just the first.
+  const jumpRoles = useMemo(() => {
+    const map = new Map();
+    const push = (cell, role) => {
+      const list = map.get(cell);
+      if (list) list.push(role);
+      else map.set(cell, [role]);
+    };
+
+    Object.entries(jumps).forEach(([sStr, e]) => {
+      const s = Number(sStr);
+      const kind = e > s ? 'ladder' : 'snake';
+      push(s, { kind, pos: 'start', partner: e, jump: s });
+      push(e, { kind, pos: 'end', partner: s, jump: s });
+    });
+
+    // Starts first, so the square's own exit reads before its arrivals.
+    map.forEach((list) => list.sort((a, b) => (a.pos === b.pos ? a.partner - b.partner : a.pos === 'start' ? -1 : 1)));
+    return map;
+  }, [jumps]);
+
+  // Hover previews a jump; a tap pins it, so touch devices (which never hover)
+  // get the same isolation. A pin wins over whatever is hovered.
+  const [hoverJumps, setHoverJumps] = useState(null);
+  const [pinnedJumps, setPinnedJumps] = useState(null);
+  const activeJumps = pinnedJumps || hoverJumps;
 
   const winnerIdx = useMemo(() => players.findIndex((p) => p.pos === boardSize), [players, boardSize]);
 
@@ -1106,20 +1371,50 @@ export default function App() {
                   .map((x) => x.i);
 
                 const isTurnCell = players[turn]?.pos === n;
-                const jumpTo = jumps[n];
-                const jumpKind = jumpTo ? (jumpTo > n ? 'ladder' : 'snake') : '';
+                const roles = jumpRoles.get(n);
                 const special = specials[n] || '';
+                const roleClass = roles
+                  ? [...new Set(roles.map((r) => `${r.kind}${r.pos === 'start' ? 'Start' : 'End'}`))].join(' ')
+                  : '';
+                const label = roles
+                  ? `Cell ${n}, ${roles
+                      .map((r) => `${r.kind} ${r.pos === 'start' ? `to ${r.partner}` : `from ${r.partner}`}`)
+                      .join(', ')}`
+                  : `Cell ${n}`;
+                const cellJumps = roles ? roles.map((r) => r.jump) : null;
+                const isHot = !!(activeJumps && cellJumps && cellJumps.some((j) => activeJumps.includes(j)));
+                // Touch has no hover, so a tap toggles the same isolation.
+                const togglePin = cellJumps
+                  ? () => setPinnedJumps((cur) => (cur && cur[0] === cellJumps[0] ? null : cellJumps))
+                  : undefined;
 
                 return (
                   <div
                     key={n}
-                    className={`cell ${jumpKind} ${special} ${isTurnCell ? 'turnCell' : ''}`}
+                    className={`cell ${roleClass} ${special} ${isTurnCell ? 'turnCell' : ''} ${
+                      isHot ? 'jumpHot' : ''
+                    }`}
                     role="gridcell"
+                    aria-label={label}
                     data-cell-number={n}
+                    onMouseEnter={cellJumps ? () => setHoverJumps(cellJumps) : undefined}
+                    onMouseLeave={cellJumps ? () => setHoverJumps(null) : undefined}
+                    onClick={togglePin}
                   >
                     <div className="cellNum">{n}</div>
                     {n === boardSize ? <div className="cellWin">🏁</div> : null}
-                    {!jumpTo && special ? (
+                    {roles ? (
+                      <div className={`cellJumps ${roles.length > 1 ? 'multi' : ''}`}>
+                        {roles.map((r) => (
+                          <span key={`${r.jump}-${r.pos}`} className={`cellJump ${r.kind} ${r.pos}`}>
+                            <span className="cellJumpGlyph">{r.kind === 'ladder' ? '🪜' : '🐍'}</span>
+                            <span className="cellJumpNum">
+                              {r.pos === 'start' ? `→${r.partner}` : `←${r.partner}`}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : special ? (
                       <div className="cellIcon">
                         {special === 'boost' ? '⭐' : special === 'trap' ? '⚠️' : special === 'freeze' ? '🧊' : '🍀'}
                       </div>
@@ -1132,7 +1427,24 @@ export default function App() {
                   </div>
                 );
               })}
-              <JumpOverlay boardRef={boardGridRef} jumps={jumps} cellMap={numberToGrid} rows={rows} cols={10} />
+              <JumpOverlay
+                boardRef={boardGridRef}
+                jumps={jumps}
+                cellMap={numberToGrid}
+                rows={rows}
+                cols={10}
+                activeJumps={activeJumps}
+                layer="under"
+              />
+              <JumpOverlay
+                boardRef={boardGridRef}
+                jumps={jumps}
+                cellMap={numberToGrid}
+                rows={rows}
+                cols={10}
+                activeJumps={activeJumps}
+                layer="over"
+              />
             </div>
 
             <div className="burstLayer" aria-hidden>
