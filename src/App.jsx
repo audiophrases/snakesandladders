@@ -70,6 +70,13 @@ function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
+function prefersReducedMotion() {
+  return (
+    typeof window !== 'undefined'
+    && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
 function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
@@ -223,9 +230,13 @@ function PlayerChip({ idx, active, tiny = false }) {
   );
 }
 
-function Dice({ value, rolling }) {
+function Dice({ value, phase = 'idle' }) {
   return (
-    <div className={`dice ${rolling ? 'rolling' : ''}`} aria-label={`Dice ${value}`}>
+    <div
+      className={`dice ${phase === 'idle' ? '' : `dice-${phase}`}`}
+      role="img"
+      aria-label={`Dice ${value}`}
+    >
       <div className={`pipgrid pips-${value}`}>
         {Array.from({ length: 9 }).map((_, i) => (
           <span key={i} className="pip" />
@@ -671,6 +682,9 @@ export default function App() {
 
   const [dice, setDice] = useState(1);
   const [rolling, setRolling] = useState(false);
+  const [dicePhase, setDicePhase] = useState('idle'); // idle | tumble | settle | land
+  const landTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(landTimer.current), []);
   const [animating, setAnimating] = useState(false);
 
   const [history, setHistory] = useState([]);
@@ -795,9 +809,18 @@ export default function App() {
   const playSfx = async (kind) => {
     if (!soundOn) return;
     if (kind === 'roll') {
-      await beep(320, 70, 'triangle', 0.04);
-      await sleep(50);
-      await beep(420, 70, 'triangle', 0.04);
+      // Clicks thin out in step with the tumble slowing down.
+      const gaps = [0, 90, 105, 130, 165, 210, 260, 320];
+      const tones = [300, 360, 330, 400, 350, 430, 380, 450];
+      for (let i = 0; i < gaps.length; i++) {
+        if (gaps[i]) await sleep(gaps[i]);
+        await beep(tones[i], 55, 'triangle', 0.035);
+      }
+      return;
+    }
+    if (kind === 'land') {
+      await beep(180, 130, 'triangle', 0.05);
+      await beep(520, 70, 'sine', 0.03);
       return;
     }
     if (kind === 'success') {
@@ -981,6 +1004,8 @@ export default function App() {
     setShowAnswer(false);
     setPending(null);
     setTurn(0);
+    window.clearTimeout(landTimer.current);
+    setDicePhase('idle');
     setDice(1 + Math.floor(rng() * 6));
     setNotice('🎉 New game! Roll the dice.');
     setPlayers((ps) => ps.map((p, i) => ({ ...p, pos: 0, skip: 0, name: p.name || `P${i + 1}` })));
@@ -992,6 +1017,8 @@ export default function App() {
     setBoardSize(s);
     setPending(null);
     setTurn(0);
+    window.clearTimeout(landTimer.current);
+    setDicePhase('idle');
     setDice(1 + Math.floor(rng() * 6));
     setHistory([]);
     setShowAnswer(false);
@@ -1038,17 +1065,50 @@ export default function App() {
   };
 
   const rollAnimated = async () => {
+    const reduced = prefersReducedMotion();
+
+    // Decide the result up front so the animation can never bias it: the
+    // in-between faces skip repeats, and that filtering must not touch the roll.
+    const finalVal = 1 + Math.floor(rng() * 6);
+
+    window.clearTimeout(landTimer.current);
     setRolling(true);
-    await playSfx('roll');
-    let val = dice;
-    const spins = 8;
-    for (let i = 0; i < spins; i++) {
-      val = 1 + Math.floor(rng() * 6);
-      setDice(val);
-      await sleep(70);
+    setDicePhase('tumble');
+    // Not awaited: the rattle should run under the tumble, not delay it.
+    void playSfx('roll');
+
+    const steps = reduced ? 3 : 15;
+    const settleAt = Math.floor(steps * 0.62);
+    let shown = dice;
+
+    for (let i = 0; i < steps; i++) {
+      const isLast = i === steps - 1;
+      // A repeat reads as a dropped frame rather than a tumble, and the last
+      // in-between face must differ from the result so the landing is visible.
+      // Only the in-between faces are constrained; finalVal was drawn fairly.
+      let next = 1 + Math.floor(rng() * 6);
+      for (let guard = 0; guard < 12; guard++) {
+        if (next !== shown && !(isLast && next === finalVal)) break;
+        next = 1 + Math.floor(rng() * 6);
+      }
+      shown = next;
+      setDice(shown);
+
+      if (!reduced && i === settleAt) setDicePhase('settle');
+
+      // Faces slow from ~50ms to ~250ms, so the die visibly loses energy
+      // instead of stopping dead. Roughly 1.7s in total.
+      const t = steps > 1 ? i / (steps - 1) : 1;
+      await sleep(reduced ? 55 : 50 + Math.pow(t, 2.2) * 200);
     }
+
+    setDice(finalVal);
+    setDicePhase('land');
     setRolling(false);
-    return val;
+    void playSfx('land');
+    landTimer.current = window.setTimeout(() => setDicePhase('idle'), reduced ? 140 : 380);
+
+    return finalVal;
   };
 
   const rollAndDraw = async () => {
@@ -1330,7 +1390,7 @@ export default function App() {
           </div>
 
           <div className="actionBar cardy">
-            <Dice value={dice} rolling={rolling} />
+            <Dice value={dice} phase={dicePhase} />
             <button
               className="goBtn"
               onClick={rollAndDraw}

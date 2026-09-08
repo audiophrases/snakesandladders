@@ -396,14 +396,66 @@
   place-items:center;
   border:1px solid rgba(255,255,255,.24);
   background:linear-gradient(145deg, rgba(255,255,255,.21), rgba(255,255,255,.08));
+  /* Resting shadow matches where diceLand ends, so nothing snaps at the end. */
+  box-shadow:0 4px 10px rgba(0,0,0,.28);
+  will-change:transform;
 }
-.dice.rolling{animation:wobble .45s linear infinite}
-@keyframes wobble{
-  0%{transform:rotate(-8deg)}
-  25%{transform:rotate(8deg)}
-  50%{transform:rotate(-6deg)}
-  75%{transform:rotate(6deg)}
-  100%{transform:rotate(-8deg)}
+/* A throw reads as three beats: an energetic tumble, a decelerating settle,
+   then the impact. Tilt stays under 90deg so the face never goes edge-on. */
+.dice-tumble{animation:diceTumble .42s cubic-bezier(.36,.05,.64,.95) infinite}
+.dice-settle{animation:diceSettle .78s cubic-bezier(.22,.9,.28,1) forwards}
+.dice-land{animation:diceLand .38s cubic-bezier(.2,1.5,.4,1)}
+
+.dice-tumble .pipgrid{filter:blur(.7px);opacity:.88}
+.dice-settle .pipgrid{filter:blur(0);opacity:1;transition:filter .35s ease, opacity .35s ease}
+
+@keyframes diceTumble{
+  0%{
+    transform:perspective(460px) translateY(0) rotateZ(-14deg) rotateX(0deg) rotateY(0deg);
+    box-shadow:0 4px 10px rgba(0,0,0,.3);
+  }
+  25%{
+    transform:perspective(460px) translateY(-15px) rotateZ(80deg) rotateX(34deg) rotateY(-26deg);
+    box-shadow:0 18px 22px rgba(0,0,0,.34);
+  }
+  50%{transform:perspective(460px) translateY(-19px) rotateZ(176deg) rotateX(-30deg) rotateY(30deg)}
+  75%{transform:perspective(460px) translateY(-11px) rotateZ(268deg) rotateX(26deg) rotateY(-18deg)}
+  100%{
+    transform:perspective(460px) translateY(0) rotateZ(346deg) rotateX(0deg) rotateY(0deg);
+    box-shadow:0 4px 10px rgba(0,0,0,.3);
+  }
+}
+
+@keyframes diceSettle{
+  0%{transform:perspective(460px) translateY(-8px) rotateZ(-24deg) rotateX(16deg)}
+  35%{transform:perspective(460px) translateY(0) rotateZ(14deg) rotateX(-8deg)}
+  62%{transform:perspective(460px) translateY(-3px) rotateZ(-7deg) rotateX(4deg)}
+  84%{transform:perspective(460px) translateY(0) rotateZ(3deg) rotateX(0deg)}
+  100%{transform:perspective(460px) translateY(0) rotateZ(0deg) rotateX(0deg)}
+}
+
+@keyframes diceLand{
+  0%{
+    transform:scale(1.16,.84) translateY(2px);
+    box-shadow:0 2px 6px rgba(0,0,0,.34), 0 0 0 0 rgba(255,255,255,.45);
+  }
+  45%{transform:scale(.95,1.08) translateY(-3px)}
+  75%{transform:scale(1.03,.98) translateY(0)}
+  100%{
+    transform:scale(1) translateY(0);
+    box-shadow:0 4px 10px rgba(0,0,0,.28), 0 0 0 12px rgba(255,255,255,0);
+  }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .dice-tumble{animation:diceNudge .34s ease-in-out infinite}
+  .dice-settle,
+  .dice-land{animation:none}
+  .dice-tumble .pipgrid{filter:none;opacity:1}
+}
+@keyframes diceNudge{
+  0%,100%{transform:scale(1)}
+  50%{transform:scale(1.07)}
 }
 
 .pipgrid{width:38px;height:38px;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:6px}
