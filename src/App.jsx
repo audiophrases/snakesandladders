@@ -682,7 +682,7 @@ export default function App() {
 
   const [dice, setDice] = useState(1);
   const [rolling, setRolling] = useState(false);
-  const [dicePhase, setDicePhase] = useState('idle'); // idle | tumble | settle | land
+  const [dicePhase, setDicePhase] = useState('idle'); // idle | throw | land
   const landTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(landTimer.current), []);
   const [animating, setAnimating] = useState(false);
@@ -810,8 +810,8 @@ export default function App() {
     if (!soundOn) return;
     if (kind === 'roll') {
       // Clicks thin out in step with the tumble slowing down.
-      const gaps = [0, 90, 105, 130, 165, 210, 260, 320];
-      const tones = [300, 360, 330, 400, 350, 430, 380, 450];
+      const gaps = [0, 90, 105, 130, 165, 210, 260, 320, 380];
+      const tones = [300, 360, 330, 400, 350, 430, 380, 450, 410];
       for (let i = 0; i < gaps.length; i++) {
         if (gaps[i]) await sleep(gaps[i]);
         await beep(tones[i], 55, 'triangle', 0.035);
@@ -1073,12 +1073,11 @@ export default function App() {
 
     window.clearTimeout(landTimer.current);
     setRolling(true);
-    setDicePhase('tumble');
+    setDicePhase('throw');
     // Not awaited: the rattle should run under the tumble, not delay it.
     void playSfx('roll');
 
     const steps = reduced ? 3 : 15;
-    const settleAt = Math.floor(steps * 0.62);
     let shown = dice;
 
     for (let i = 0; i < steps; i++) {
@@ -1093,8 +1092,6 @@ export default function App() {
       }
       shown = next;
       setDice(shown);
-
-      if (!reduced && i === settleAt) setDicePhase('settle');
 
       // Faces slow from ~50ms to ~250ms, so the die visibly loses energy
       // instead of stopping dead. Roughly 1.7s in total.

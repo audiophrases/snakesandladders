@@ -398,40 +398,48 @@
   background:linear-gradient(145deg, rgba(255,255,255,.21), rgba(255,255,255,.08));
   /* Resting shadow matches where diceLand ends, so nothing snaps at the end. */
   box-shadow:0 4px 10px rgba(0,0,0,.28);
-  will-change:transform;
 }
-/* A throw reads as three beats: an energetic tumble, a decelerating settle,
-   then the impact. Tilt stays under 90deg so the face never goes edge-on. */
-.dice-tumble{animation:diceTumble .42s cubic-bezier(.36,.05,.64,.95) infinite}
-.dice-settle{animation:diceSettle .78s cubic-bezier(.22,.9,.28,1) forwards}
+.dice-throw,
+.dice-land{will-change:transform}
+/* One continuous throw, then the impact. Swapping a spin animation for a
+   separate settle animation snapped the die ~162deg in a single frame, so the
+   deceleration is baked into the keyframe spacing instead (linear timing, with
+   the angle steps shrinking) and the whole throw runs as one animation.
+   Tilt stays under 90deg so the face never goes edge-on. */
+.dice-throw{animation:diceThrow 2s linear forwards}
+.dice-throw .pipgrid{animation:dicePips 2s linear forwards}
 .dice-land{animation:diceLand .38s cubic-bezier(.2,1.5,.4,1)}
 
-.dice-tumble .pipgrid{filter:blur(.7px);opacity:.88}
-.dice-settle .pipgrid{filter:blur(0);opacity:1;transition:filter .35s ease, opacity .35s ease}
-
-@keyframes diceTumble{
+@keyframes diceThrow{
   0%{
-    transform:perspective(460px) translateY(0) rotateZ(-14deg) rotateX(0deg) rotateY(0deg);
-    box-shadow:0 4px 10px rgba(0,0,0,.3);
+    transform:perspective(460px) translateY(0) rotateZ(0deg) rotateX(0deg) rotateY(0deg);
+    box-shadow:0 4px 10px rgba(0,0,0,.28);
   }
-  25%{
-    transform:perspective(460px) translateY(-15px) rotateZ(80deg) rotateX(34deg) rotateY(-26deg);
+  8%{
+    transform:perspective(460px) translateY(-17px) rotateZ(150deg) rotateX(30deg) rotateY(-22deg);
     box-shadow:0 18px 22px rgba(0,0,0,.34);
   }
-  50%{transform:perspective(460px) translateY(-19px) rotateZ(176deg) rotateX(-30deg) rotateY(30deg)}
-  75%{transform:perspective(460px) translateY(-11px) rotateZ(268deg) rotateX(26deg) rotateY(-18deg)}
+  16%{transform:perspective(460px) translateY(-20px) rotateZ(300deg) rotateX(-26deg) rotateY(24deg)}
+  25%{transform:perspective(460px) translateY(-18px) rotateZ(460deg) rotateX(28deg) rotateY(-20deg)}
+  35%{transform:perspective(460px) translateY(-14px) rotateZ(620deg) rotateX(-22deg) rotateY(18deg)}
+  46%{transform:perspective(460px) translateY(-10px) rotateZ(770deg) rotateX(18deg) rotateY(-14deg)}
+  57%{transform:perspective(460px) translateY(-6px) rotateZ(895deg) rotateX(-13deg) rotateY(10deg)}
+  68%{transform:perspective(460px) translateY(-3px) rotateZ(990deg) rotateX(9deg) rotateY(-6deg)}
+  78%{transform:perspective(460px) translateY(-1px) rotateZ(1045deg) rotateX(-5deg) rotateY(3deg)}
+  87%{transform:perspective(460px) translateY(0) rotateZ(1072deg) rotateX(2deg) rotateY(0deg)}
+  94%{transform:perspective(460px) translateY(0) rotateZ(1085deg) rotateX(0deg) rotateY(0deg)}
   100%{
-    transform:perspective(460px) translateY(0) rotateZ(346deg) rotateX(0deg) rotateY(0deg);
-    box-shadow:0 4px 10px rgba(0,0,0,.3);
+    transform:perspective(460px) translateY(0) rotateZ(1080deg) rotateX(0deg) rotateY(0deg);
+    box-shadow:0 4px 10px rgba(0,0,0,.28);
   }
 }
 
-@keyframes diceSettle{
-  0%{transform:perspective(460px) translateY(-8px) rotateZ(-24deg) rotateX(16deg)}
-  35%{transform:perspective(460px) translateY(0) rotateZ(14deg) rotateX(-8deg)}
-  62%{transform:perspective(460px) translateY(-3px) rotateZ(-7deg) rotateX(4deg)}
-  84%{transform:perspective(460px) translateY(0) rotateZ(3deg) rotateX(0deg)}
-  100%{transform:perspective(460px) translateY(0) rotateZ(0deg) rotateX(0deg)}
+/* Motion blur clears as the spin slows. */
+@keyframes dicePips{
+  0%{filter:blur(.75px);opacity:.86}
+  50%{filter:blur(.6px);opacity:.9}
+  80%{filter:blur(0);opacity:1}
+  100%{filter:blur(0);opacity:1}
 }
 
 @keyframes diceLand{
@@ -448,10 +456,9 @@
 }
 
 @media (prefers-reduced-motion:reduce){
-  .dice-tumble{animation:diceNudge .34s ease-in-out infinite}
-  .dice-settle,
+  .dice-throw{animation:diceNudge .34s ease-in-out infinite}
   .dice-land{animation:none}
-  .dice-tumble .pipgrid{filter:none;opacity:1}
+  .dice-throw .pipgrid{animation:none;filter:none;opacity:1}
 }
 @keyframes diceNudge{
   0%,100%{transform:scale(1)}
