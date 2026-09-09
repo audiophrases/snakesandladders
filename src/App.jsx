@@ -52,14 +52,11 @@ function pickEvenly(entries, count) {
   return picked.sort((a, b) => a.start - b.start);
 }
 
-const CATALAN_EMOJI = '🥘';
-const ENGLISH_EMOJI = '🍔';
-
+// Translation types carry no icon: the CA/EN initials in typeLabel say it
+// better than a picture of food.
 const TYPE_ICON = {
   speaking: '🗣️',
   error_correction: '🛠️',
-  translate_ca_en: `${CATALAN_EMOJI}➡️${ENGLISH_EMOJI}`,
-  translate_en_ca: `${ENGLISH_EMOJI}➡️${CATALAN_EMOJI}`,
 };
 
 function clamp(n, a, b) {
@@ -217,6 +214,22 @@ function typeLabel(t) {
   if (t === 'translate_ca_en') return 'CA → EN';
   if (t === 'translate_en_ca') return 'EN → CA';
   return t || 'Task';
+}
+
+function isTranslation(t) {
+  return t === 'translate_ca_en' || t === 'translate_en_ca';
+}
+
+function typeIcon(t) {
+  if (isTranslation(t)) return '';
+  return TYPE_ICON[t] || '🎯';
+}
+
+// Icon plus label, minus the icon for translations so it reads "EN → CA"
+// rather than repeating itself.
+function typeBadge(t) {
+  const icon = typeIcon(t);
+  return icon ? `${icon} ${typeLabel(t)}` : typeLabel(t);
 }
 
 function PlayerChip({ idx, active, tiny = false }) {
@@ -1132,7 +1145,7 @@ export default function App() {
     setShowAnswer(false);
     setHistory((h) => [picked, ...h].slice(0, 60));
     setPending({ roll: value, taskId: picked.id });
-    setNotice(`${TYPE_ICON[picked.type] || '🎯'} ${typeLabel(picked.type)}`);
+    setNotice(typeBadge(picked.type));
   };
 
   const applySpecial = async (pos) => {
@@ -1367,7 +1380,7 @@ export default function App() {
 
           <div className="taskCard cardy">
             <div className="taskTop">
-              <div className="taskType">{current ? `${TYPE_ICON[current.type] || '🎯'} ${typeLabel(current.type)}` : '🎯 Task'}</div>
+              <div className="taskType">{current ? typeBadge(current.type) : '🎯 Task'}</div>
               <button className="tinyBtn" onClick={() => setShowAnswer((v) => !v)} disabled={!current || !current.target}>
                 {showAnswer ? '🙈' : '💡'}
               </button>
@@ -1545,7 +1558,7 @@ export default function App() {
                     setHistory((h) => [t, ...h.filter((x) => x !== t)]);
                   }}
                 >
-                  <span>{TYPE_ICON[t.type] || '🎯'}</span>
+                  <span className="historyTag">{typeIcon(t.type) || typeLabel(t.type)}</span>
                   <span>{t.prompt}</span>
                 </button>
               ))}

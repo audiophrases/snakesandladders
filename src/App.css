@@ -386,6 +386,15 @@
   overflow:hidden;
   text-overflow:ellipsis;
 }
+/* Translation rows carry "CA → EN" here instead of an emoji, so it has to hold
+   its width without squeezing the prompt beside it. */
+.historyTag{
+  flex:0 0 auto;
+  white-space:nowrap;
+  font-size:11px;
+  font-weight:800;
+  color:var(--muted);
+}
 
 /* Dice */
 .dice{
