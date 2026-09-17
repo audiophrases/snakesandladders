@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { DEFAULT_TYPE_WEIGHTS, TASKS_CSV_URL } from './config';
 import { fetchTasks, listGamePacks, weightedPick } from './tasks';
+import { createSoundPlayer } from './sound';
 
 const STORAGE_KEY = 'snl_party_v4';
 const DEFAULT_BOARD_SIZE = 60;
@@ -707,7 +708,9 @@ export default function App() {
   const [notice, setNotice] = useState('🎉 Roll the dice and play!');
   const [bursts, setBursts] = useState([]); // {id, emoji, x, y}
   const [soundOn, setSoundOn] = useState(true);
-  const audioCtxRef = useRef(null);
+  const [audio] = useState(() => createSoundPlayer());
+  useEffect(() => { audio.setEnabled(soundOn); }, [audio, soundOn]);
+  useEffect(() => () => audio.dispose(), [audio]);
   const boardGridRef = useRef(null);
 
   const [hydrated, setHydrated] = useState(false);
@@ -790,89 +793,12 @@ export default function App() {
   const winnerIdx = useMemo(() => players.findIndex((p) => p.pos === boardSize), [players, boardSize]);
 
   // --- Sound ---
-  const ensureAudio = () => {
-    if (!audioCtxRef.current) {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return null;
-      audioCtxRef.current = new Ctx();
-    }
-    return audioCtxRef.current;
-  };
-
-  const beep = async (freq, ms, type = 'sine', gain = 0.04) => {
-    const ctx = ensureAudio();
-    if (!ctx || !soundOn) return;
-    if (ctx.state === 'suspended') await ctx.resume();
-
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = type;
-    o.frequency.value = freq;
-    g.gain.value = gain;
-    o.connect(g);
-    g.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    g.gain.setValueAtTime(gain, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + ms / 1000);
-    o.start(now);
-    o.stop(now + ms / 1000);
-  };
-
-  const playSfx = async (kind) => {
-    if (!soundOn) return;
-    if (kind === 'roll') {
-      // Clicks thin out in step with the tumble slowing down.
-      const gaps = [0, 90, 105, 130, 165, 210, 260, 320, 380];
-      const tones = [300, 360, 330, 400, 350, 430, 380, 450, 410];
-      for (let i = 0; i < gaps.length; i++) {
-        if (gaps[i]) await sleep(gaps[i]);
-        await beep(tones[i], 55, 'triangle', 0.035);
-      }
-      return;
-    }
-    if (kind === 'land') {
-      await beep(180, 130, 'triangle', 0.05);
-      await beep(520, 70, 'sine', 0.03);
-      return;
-    }
-    if (kind === 'success') {
-      await beep(520, 80, 'sine', 0.05);
-      await sleep(55);
-      await beep(700, 110, 'sine', 0.05);
-      return;
-    }
-    if (kind === 'fail') {
-      await beep(260, 120, 'sawtooth', 0.045);
-      return;
-    }
-    if (kind === 'ladder') {
-      await beep(500, 80, 'square', 0.045);
-      await sleep(45);
-      await beep(650, 90, 'square', 0.045);
-      await sleep(45);
-      await beep(830, 110, 'square', 0.045);
-      return;
-    }
-    if (kind === 'snake') {
-      await beep(380, 100, 'sawtooth', 0.04);
-      await sleep(35);
-      await beep(260, 130, 'sawtooth', 0.04);
-      return;
-    }
-    if (kind === 'win') {
-      await beep(620, 110, 'triangle', 0.05);
-      await sleep(40);
-      await beep(780, 110, 'triangle', 0.05);
-      await sleep(40);
-      await beep(980, 170, 'triangle', 0.05);
-      return;
-    }
-    if (kind === 'freeze') {
-      await beep(410, 80, 'sine', 0.04);
-      await sleep(50);
-      await beep(310, 120, 'sine', 0.04);
-    }
+  const { beep, play: playSfx } = audio;
+  const toggleSound = () => {
+    const enabled = !soundOn;
+    audio.setEnabled(enabled);
+    setSoundOn(enabled);
+    if (enabled) playSfx('success');
   };
 
   // --- Bursts ---
@@ -1295,8 +1221,14 @@ export default function App() {
         </div>
 
         <div className="hudActions">
-          <button className="iconBtn" onClick={() => setSoundOn((v) => !v)} title="Sound">
-            {soundOn ? '🔊' : '🔈'}
+          <button
+            className="iconBtn"
+            onClick={toggleSound}
+            title={soundOn ? 'Mute sound effects' : 'Enable sound effects'}
+            aria-label="Sound effects"
+            aria-pressed={soundOn}
+          >
+            {soundOn ? '🔊' : '🔇'}
           </button>
           <button className="iconBtn" onClick={resetSession} title="New game">
             🆕
